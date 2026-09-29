@@ -44,11 +44,7 @@ async function jfetch(url, { method = "GET", body } = {}) {
   const res = await fetch(url, {
     method,
     credentials: "include",
-    headers: body
-      ? {
-          "content-type": "application/json",
-        }
-      : {},
+    headers: body ? { "content-type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
 
@@ -59,13 +55,8 @@ async function jfetch(url, { method = "GET", body } = {}) {
   } catch {}
 
   if (!res.ok) {
-    if (res.status === 401) {
-      showLogin();
-    }
-
     const error = new Error(data.error || `Request failed (${res.status})`);
     error.status = res.status;
-
     throw error;
   }
 
@@ -74,75 +65,33 @@ async function jfetch(url, { method = "GET", body } = {}) {
 
 function toast(message, kind = "ok") {
   const el = document.createElement("div");
-
   el.className = `toast ${kind}`;
   el.textContent = message;
-
   $("#toasts").appendChild(el);
 
   setTimeout(() => {
     el.classList.add("out");
-
-    setTimeout(() => {
-      el.remove();
-    }, 400);
+    setTimeout(() => el.remove(), 400);
   }, 3500);
 }
 
 function timeAgo(timestamp) {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
 
-  if (seconds < 90) {
-    return "just now";
-  }
-
-  if (seconds < 3600) {
-    return `${Math.floor(seconds / 60)}m ago`;
-  }
-
-  if (seconds < 86400) {
-    return `${Math.floor(seconds / 3600)}h ago`;
-  }
-
+  if (seconds < 90) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
 function badgeFor(video) {
-  if (
-    video.source === "r2" ||
-    (D.mediaBaseUrl && video.url.startsWith(D.mediaBaseUrl))
-  ) {
-    return {
-      cls: "r2",
-      label: "R2",
-    };
+  if (video.source === "r2" || (D.mediaBaseUrl && video.url.startsWith(D.mediaBaseUrl))) {
+    return { cls: "r2", label: "R2" };
   }
-
-  if (/(?:youtube\.com|youtu\.be)/i.test(video.url)) {
-    return {
-      cls: "yt",
-      label: "YOUTUBE",
-    };
-  }
-
-  if (/vimeo\.com/i.test(video.url)) {
-    return {
-      cls: "vimeo",
-      label: "VIMEO",
-    };
-  }
-
-  if (/\.m3u8(\?|$)/i.test(video.url)) {
-    return {
-      cls: "hls",
-      label: "HLS",
-    };
-  }
-
-  return {
-    cls: "direct",
-    label: "DIRECT",
-  };
+  if (/(?:youtube\.com|youtu\.be)/i.test(video.url)) return { cls: "yt", label: "YOUTUBE" };
+  if (/vimeo\.com/i.test(video.url)) return { cls: "vimeo", label: "VIMEO" };
+  if (/\.m3u8(\?|$)/i.test(video.url)) return { cls: "hls", label: "HLS" };
+  return { cls: "direct", label: "DIRECT" };
 }
 
 function resolvedVideo(tv) {
@@ -155,11 +104,7 @@ function resolvedVideo(tv) {
 
 function statusOf(tv) {
   const timestamp = D.presence[tv.code];
-
-  if (!timestamp || Date.now() - timestamp > ONLINE_MS) {
-    return "off";
-  }
-
+  if (!timestamp || Date.now() - timestamp > ONLINE_MS) return "off";
   return resolvedVideo(tv) ? "air" : "idle";
 }
 
@@ -168,18 +113,14 @@ async function refresh() {
     D = await jfetch("/api/admin/dashboard");
     render();
   } catch (error) {
-    if (error.status !== 401) {
-      toast(error.message, "err");
-    }
+    toast(error.message, "err");
   }
 }
 
 function render() {
   const editing =
     document.activeElement && document.activeElement.closest
-      ? document.activeElement.closest(
-          ".tname,.tgym,#autoForm,.addform,.uploadform,#bcVideoSelect"
-        )
+      ? document.activeElement.closest(".tname,.tgym,#autoForm,.addform,.uploadform,#bcVideoSelect")
       : null;
 
   renderStats();
@@ -197,12 +138,8 @@ function render() {
 
 function renderStats() {
   $("#statTotal").textContent = D.tvs.length;
-  $("#statOnline").textContent = D.tvs.filter(
-    (tv) => statusOf(tv) !== "off"
-  ).length;
-  $("#statOnAir").textContent = D.tvs.filter(
-    (tv) => statusOf(tv) === "air"
-  ).length;
+  $("#statOnline").textContent = D.tvs.filter((tv) => statusOf(tv) !== "off").length;
+  $("#statOnAir").textContent = D.tvs.filter((tv) => statusOf(tv) === "air").length;
 }
 
 function renderGymChips() {
@@ -210,14 +147,10 @@ function renderGymChips() {
 
   $("#gymChips").innerHTML =
     `<button class="gchip ${gymFilter === "ALL" ? "on" : ""}" data-gym="ALL">ALL</button>` +
-    GYMS
-      .map(
-        (gym) =>
-          `<button class="gchip gym-${gym} ${
-            gymFilter === gym ? "on" : ""
-          }" data-gym="${gym}">${gym} · ${count(gym)}</button>`
-      )
-      .join("");
+    GYMS.map(
+      (gym) =>
+        `<button class="gchip gym-${gym} ${gymFilter === gym ? "on" : ""}" data-gym="${gym}">${gym} · ${count(gym)}</button>`
+    ).join("");
 }
 
 function cardHtml(tv) {
@@ -236,32 +169,21 @@ function cardHtml(tv) {
 
   return `<article class="card st-${status}">
     <div class="screen">${screen}</div>
-
     <div class="meta">
       <div class="l1">
         <span class="code">${tv.code}</span>
         <span class="led ${status}"></span>
       </div>
-
       <div class="l2">
         <input class="tname" value="${esc(tv.name || "")}" data-code="${tv.code}" placeholder="Screen name" />
         <select class="tgym" data-code="${tv.code}">
-          ${GYMS.map(
-            (gym) =>
-              `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`
-          ).join("")}
+          ${GYMS.map((gym) => `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`).join("")}
         </select>
       </div>
-
       <div class="l3">
-        <span class="now ${video ? "on" : ""}">
-          ${video ? "▸ " + esc(video.title) : "Standby"}
-        </span>
-        <span class="seen">
-          ${D.presence[tv.code] ? timeAgo(D.presence[tv.code]) : "never"}
-        </span>
+        <span class="now ${video ? "on" : ""}">${video ? "▸ " + esc(video.title) : "Standby"}</span>
+        <span class="seen">${D.presence[tv.code] ? timeAgo(D.presence[tv.code]) : "never"}</span>
       </div>
-
       <div class="l4">
         <button class="mbtn" data-act="reload" data-code="${tv.code}">Restart</button>
         <button class="mbtn" data-act="standby" data-code="${tv.code}">Stop</button>
@@ -278,7 +200,7 @@ function renderGrid() {
 
   $("#tvGrid").innerHTML = list.length
     ? list.map(cardHtml).join("")
-    : `<div class="empty">No screens yet.</div>`;
+    : `<div class="empty">No screens yet. Click + ADD SCREEN.</div>`;
 }
 
 function renderLibrary() {
@@ -290,34 +212,13 @@ function renderLibrary() {
 
           return `<div class="vrow">
             <span class="vbadge ${badge.cls}">${badge.label}</span>
-
             <div class="vinfo">
               <b>${esc(video.title)}</b>
               <span>${esc(video.url)}</span>
             </div>
-
-            <span class="vused">
-              ${used ? `on ${used}` : "unused"}
-            </span>
-
-            <button
-              class="mbtn"
-              data-vact="edit"
-              data-id="${video.id}"
-              data-title="${esc(video.title)}"
-              data-url="${esc(video.url)}"
-            >
-              Edit
-            </button>
-
-            <button
-              class="mbtn danger"
-              data-vact="del"
-              data-id="${video.id}"
-              data-title="${esc(video.title)}"
-            >
-              Delete
-            </button>
+            <span class="vused">${used ? `on ${used}` : "unused"}</span>
+            <button class="mbtn" data-vact="edit" data-id="${video.id}" data-title="${esc(video.title)}" data-url="${esc(video.url)}">Edit</button>
+            <button class="mbtn danger" data-vact="del" data-id="${video.id}" data-title="${esc(video.title)}">Delete</button>
           </div>`;
         })
         .join("")
@@ -330,11 +231,7 @@ function renderBroadcast() {
     D.videos
       .map(
         (video) =>
-          `<option value="${video.id}" ${
-            bcVideo === video.id ? "selected" : ""
-          }>
-            ${esc(video.title)}
-          </option>`
+          `<option value="${video.id}" ${bcVideo === video.id ? "selected" : ""}>${esc(video.title)}</option>`
       )
       .join("");
 
@@ -352,15 +249,10 @@ function renderBroadcast() {
               <span class="gname">${GYM_NAMES[gym]}</span>
               <button class="gymall" data-gym="${gym}" type="button">toggle all</button>
             </div>
-
             <div class="chiprow">
               ${tvs
                 .map(
-                  (tv) => `<button
-                    class="tvchip ${bcCodes.has(tv.code) ? "sel" : ""} st-${statusOf(tv)}"
-                    data-code="${tv.code}"
-                    type="button"
-                  >
+                  (tv) => `<button class="tvchip ${bcCodes.has(tv.code) ? "sel" : ""} st-${statusOf(tv)}" data-code="${tv.code}" type="button">
                     <b>${tv.code}</b>
                     <i>${esc(tv.name || "")}</i>
                   </button>`
@@ -395,11 +287,7 @@ function renderAuto() {
     D.videos
       .map(
         (video) =>
-          `<option value="${video.id}" ${
-            settings.fallbackVideoId === video.id ? "selected" : ""
-          }>
-            ${esc(video.title)}
-          </option>`
+          `<option value="${video.id}" ${settings.fallbackVideoId === video.id ? "selected" : ""}>${esc(video.title)}</option>`
       )
       .join("");
 
@@ -416,48 +304,30 @@ function modal({ title, fields = [], submit = "Save", danger = false }) {
     root.innerHTML = `<div class="mov">
       <div class="modal">
         <h3>${title}</h3>
-
         <form>
           ${fields
             .map((field) => {
               if (field.type === "select") {
-                return `<label>
-                  ${field.label}
+                return `<label>${field.label}
                   <select name="${field.name}">
                     ${field.options
                       .map(
                         (option) =>
-                          `<option value="${option.v}" ${
-                            option.v === field.value ? "selected" : ""
-                          }>
-                            ${esc(option.l)}
-                          </option>`
+                          `<option value="${option.v}" ${option.v === field.value ? "selected" : ""}>${esc(option.l)}</option>`
                       )
                       .join("")}
                   </select>
                 </label>`;
               }
 
-              return `<label>
-                ${field.label}
-                <input
-                  name="${field.name}"
-                  type="${field.type || "text"}"
-                  value="${esc(field.value === undefined ? "" : field.value)}"
-                  placeholder="${field.ph || ""}"
-                  ${field.pattern ? `pattern="${field.pattern}"` : ""}
-                  ${field.maxlength ? `maxlength="${field.maxlength}"` : ""}
-                  required
-                />
+              return `<label>${field.label}
+                <input name="${field.name}" type="${field.type || "text"}" value="${esc(field.value === undefined ? "" : field.value)}" placeholder="${field.ph || ""}" ${field.pattern ? `pattern="${field.pattern}"` : ""} ${field.maxlength ? `maxlength="${field.maxlength}"` : ""} required />
               </label>`;
             })
             .join("")}
-
           <div class="mactions">
             <button type="button" class="btn ghost" data-cancel>Cancel</button>
-            <button class="btn ${danger ? "danger" : "primary"}" type="submit">
-              ${submit}
-            </button>
+            <button class="btn ${danger ? "danger" : "primary"}" type="submit">${submit}</button>
           </div>
         </form>
       </div>
@@ -469,13 +339,9 @@ function modal({ title, fields = [], submit = "Save", danger = false }) {
     };
 
     root.querySelector("[data-cancel]").onclick = () => close(null);
-
     root.querySelector(".mov").addEventListener("click", (event) => {
-      if (event.target.classList.contains("mov")) {
-        close(null);
-      }
+      if (event.target.classList.contains("mov")) close(null);
     });
-
     root.querySelector("form").onsubmit = (event) => {
       event.preventDefault();
       close(Object.fromEntries(new FormData(event.target)));
@@ -483,33 +349,15 @@ function modal({ title, fields = [], submit = "Save", danger = false }) {
 
     setTimeout(() => {
       const first = root.querySelector("input,select");
-
-      if (first) {
-        first.focus();
-      }
+      if (first) first.focus();
     }, 40);
   });
-}
-
-function showLogin() {
-  $("#loginOv").hidden = false;
-
-  setTimeout(() => {
-    $("#loginPass").focus();
-  }, 50);
-}
-
-function hideLogin() {
-  $("#loginOv").hidden = true;
 }
 
 let loopsStarted = false;
 
 function startLoops() {
-  if (loopsStarted) {
-    return;
-  }
-
+  if (loopsStarted) return;
   loopsStarted = true;
 
   setInterval(() => {
@@ -519,9 +367,7 @@ function startLoops() {
   setInterval(refresh, 15000);
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      refresh();
-    }
+    if (!document.hidden) refresh();
   });
 
   refresh();
@@ -530,31 +376,16 @@ function startLoops() {
 document.addEventListener("DOMContentLoaded", () => {
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      $$(".tab").forEach((item) => {
-        item.classList.toggle("on", item === tab);
-      });
-
-      $("#viewScreens").classList.toggle(
-        "on",
-        tab.dataset.view === "screens"
-      );
-
-      $("#viewSettings").classList.toggle(
-        "on",
-        tab.dataset.view === "settings"
-      );
+      $$(".tab").forEach((item) => item.classList.toggle("on", item === tab));
+      $("#viewScreens").classList.toggle("on", tab.dataset.view === "screens");
+      $("#viewSettings").classList.toggle("on", tab.dataset.view === "settings");
     });
   });
 
   $("#gymChips").addEventListener("click", (event) => {
     const button = event.target.closest("[data-gym]");
-
-    if (!button) {
-      return;
-    }
-
+    if (!button) return;
     gymFilter = button.dataset.gym;
-
     renderGymChips();
     renderGrid();
   });
@@ -564,41 +395,22 @@ document.addEventListener("DOMContentLoaded", () => {
       title: "ADD SCREEN",
       submit: "Create",
       fields: [
-        {
-          name: "code",
-          label: "Code",
-          value: D.nextCode,
-          pattern: "[0-9]{1,4}",
-          maxlength: 4,
-        },
-        {
-          name: "name",
-          label: "Name",
-        },
+        { name: "code", label: "Code", value: D.nextCode, pattern: "[0-9]{1,4}", maxlength: 4 },
+        { name: "name", label: "Name" },
         {
           name: "gym",
           label: "Gym",
           type: "select",
-          options: GYMS.map((gym) => ({
-            v: gym,
-            l: `${gym} — ${GYM_NAMES[gym]}`,
-          })),
+          options: GYMS.map((gym) => ({ v: gym, l: `${gym} — ${GYM_NAMES[gym]}` })),
         },
       ],
     });
 
-    if (!result) {
-      return;
-    }
+    if (!result) return;
 
     try {
-      const response = await jfetch("/api/admin/tvs", {
-        method: "POST",
-        body: result,
-      });
-
+      const response = await jfetch("/api/admin/tvs", { method: "POST", body: result });
       toast(`Screen ${response.code} created. Enter ${response.code} on the TV.`);
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
@@ -607,27 +419,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#tvGrid").addEventListener("change", async (event) => {
     const el = event.target;
-
-    if (!el.dataset || !el.dataset.code) {
-      return;
-    }
+    if (!el.dataset || !el.dataset.code) return;
 
     try {
-      const body = el.classList.contains("tname")
-        ? {
-            name: el.value,
-          }
-        : {
-            gym: el.value,
-          };
-
-      await jfetch(`/api/admin/tvs/${el.dataset.code}`, {
-        method: "PATCH",
-        body,
-      });
-
+      const body = el.classList.contains("tname") ? { name: el.value } : { gym: el.value };
+      await jfetch(`/api/admin/tvs/${el.dataset.code}`, { method: "PATCH", body });
       toast("Saved.");
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
@@ -636,33 +433,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#tvGrid").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-act]");
-
-    if (!button) {
-      return;
-    }
+    if (!button) return;
 
     const { act, code } = button.dataset;
 
     try {
       if (act === "reload") {
-        await jfetch(`/api/admin/tvs/${code}/reload`, {
-          method: "POST",
-        });
-
+        await jfetch(`/api/admin/tvs/${code}/reload`, { method: "POST" });
         toast(`Restart signal sent to ${code}.`);
       }
 
       if (act === "standby") {
-        await jfetch("/api/admin/broadcast", {
-          method: "POST",
-          body: {
-            videoId: null,
-            codes: [code],
-          },
-        });
-
+        await jfetch("/api/admin/broadcast", { method: "POST", body: { videoId: null, codes: [code] } });
         toast(`${code} sent to standby.`);
-
         refresh();
       }
 
@@ -671,25 +454,12 @@ document.addEventListener("DOMContentLoaded", () => {
           title: `DELETE SCREEN ${code}?`,
           submit: "Delete",
           danger: true,
-          fields: [
-            {
-              name: "confirm",
-              label: `Type ${code} to confirm`,
-              pattern: code,
-            },
-          ],
+          fields: [{ name: "confirm", label: `Type ${code} to confirm`, pattern: code }],
         });
+        if (!confirmed) return;
 
-        if (!confirmed) {
-          return;
-        }
-
-        await jfetch(`/api/admin/tvs/${code}`, {
-          method: "DELETE",
-        });
-
+        await jfetch(`/api/admin/tvs/${code}`, { method: "DELETE" });
         toast(`Screen ${code} deleted.`);
-
         refresh();
       }
     } catch (error) {
@@ -703,17 +473,11 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       await jfetch("/api/admin/videos", {
         method: "POST",
-        body: {
-          title: $("#avTitle").value,
-          url: $("#avUrl").value,
-        },
+        body: { title: $("#avTitle").value, url: $("#avUrl").value },
       });
-
       $("#avTitle").value = "";
       $("#avUrl").value = "";
-
       toast("Video link added.");
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
@@ -732,28 +496,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const formData = new FormData();
-
-    formData.append(
-      "title",
-      $("#upTitle").value.trim() || file.name.replace(/\.[^.]+$/, "")
-    );
-
+    formData.append("title", $("#upTitle").value.trim() || file.name.replace(/\.[^.]+$/, ""));
     formData.append("file", file);
 
     const progress = $("#upProgress");
-
     progress.hidden = false;
     progress.value = 0;
 
     const xhr = new XMLHttpRequest();
-
     xhr.open("POST", "/api/admin/videos/upload");
 
     xhr.upload.onprogress = (uploadEvent) => {
       if (uploadEvent.lengthComputable) {
-        progress.value = Math.round(
-          (uploadEvent.loaded / uploadEvent.total) * 100
-        );
+        progress.value = Math.round((uploadEvent.loaded / uploadEvent.total) * 100);
       }
     };
 
@@ -761,16 +516,11 @@ document.addEventListener("DOMContentLoaded", () => {
       progress.hidden = true;
 
       let data = {};
-
-      try {
-        data = JSON.parse(xhr.responseText);
-      } catch {}
+      try { data = JSON.parse(xhr.responseText); } catch {}
 
       if (xhr.status >= 200 && xhr.status < 300) {
         toast("Uploaded to R2.");
-
         form.reset();
-
         refresh();
       } else {
         toast(data.error || "Upload failed.", "err");
@@ -802,38 +552,23 @@ document.addEventListener("DOMContentLoaded", () => {
             name: "key",
             label: "R2 file",
             type: "select",
-            options: files.map((file) => ({
-              v: file.key,
-              l: `${file.key} · ${(file.size / 1048576).toFixed(1)} MB`,
-            })),
+            options: files.map((file) => ({ v: file.key, l: `${file.key} · ${(file.size / 1048576).toFixed(1)} MB` })),
           },
-          {
-            name: "title",
-            label: "Title (optional)",
-          },
+          { name: "title", label: "Title (optional)" },
         ],
       });
 
-      if (!result) {
-        return;
-      }
+      if (!result) return;
 
       const file = files.find((item) => item.key === result.key);
-
-      if (!file) {
-        return;
-      }
+      if (!file) return;
 
       await jfetch("/api/admin/videos", {
         method: "POST",
-        body: {
-          title: result.title || file.key.split("/").pop(),
-          url: file.url,
-        },
+        body: { title: result.title || file.key.split("/").pop(), url: file.url },
       });
 
       toast("R2 video imported.");
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
@@ -842,10 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#videoList").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-vact]");
-
-    if (!button) {
-      return;
-    }
+    if (!button) return;
 
     const { vact, id, title, url } = button.dataset;
 
@@ -854,34 +586,17 @@ document.addEventListener("DOMContentLoaded", () => {
         const result = await modal({
           title: "EDIT VIDEO",
           fields: [
-            {
-              name: "title",
-              label: "Title",
-              value: title,
-            },
-            {
-              name: "url",
-              label: "URL",
-              value: url,
-              type: "url",
-            },
+            { name: "title", label: "Title", value: title },
+            { name: "url", label: "URL", value: url, type: "url" },
           ],
         });
-
-        if (!result) {
-          return;
-        }
+        if (!result) return;
 
         await jfetch(`/api/admin/videos/${id}`, {
           method: "PATCH",
-          body: {
-            title: result.title,
-            url: result.url,
-          },
+          body: { title: result.title, url: result.url },
         });
-
         toast("Video updated.");
-
         refresh();
       }
 
@@ -890,29 +605,13 @@ document.addEventListener("DOMContentLoaded", () => {
           title: `DELETE “${title}”?`,
           submit: "Delete",
           danger: true,
-          fields: [
-            {
-              name: "confirm",
-              label: "Type DELETE to confirm",
-              pattern: "DELETE",
-            },
-          ],
+          fields: [{ name: "confirm", label: "Type DELETE to confirm", pattern: "DELETE" }],
         });
+        if (!confirmed) return;
 
-        if (!confirmed) {
-          return;
-        }
-
-        await jfetch(`/api/admin/videos/${id}`, {
-          method: "DELETE",
-        });
-
-        if (bcVideo === id) {
-          bcVideo = null;
-        }
-
+        await jfetch(`/api/admin/videos/${id}`, { method: "DELETE" });
+        if (bcVideo === id) bcVideo = null;
         toast("Video deleted.");
-
         refresh();
       }
     } catch (error) {
@@ -922,7 +621,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#bcVideoSelect").addEventListener("change", (event) => {
     bcVideo = event.target.value || null;
-
     updateBcBar();
   });
 
@@ -930,62 +628,34 @@ document.addEventListener("DOMContentLoaded", () => {
     const toggleAll = event.target.closest(".gymall");
 
     if (toggleAll) {
-      const codes = D.tvs
-        .filter((tv) => tv.gym === toggleAll.dataset.gym)
-        .map((tv) => tv.code);
-
+      const codes = D.tvs.filter((tv) => tv.gym === toggleAll.dataset.gym).map((tv) => tv.code);
       const every = codes.every((code) => bcCodes.has(code));
-
-      codes.forEach((code) => {
-        if (every) {
-          bcCodes.delete(code);
-        } else {
-          bcCodes.add(code);
-        }
-      });
-
+      codes.forEach((code) => (every ? bcCodes.delete(code) : bcCodes.add(code)));
       renderBroadcast();
-
       return;
     }
 
     const chip = event.target.closest("[data-code]");
-
-    if (!chip) {
-      return;
-    }
+    if (!chip) return;
 
     const code = chip.dataset.code;
-
-    if (bcCodes.has(code)) {
-      bcCodes.delete(code);
-    } else {
-      bcCodes.add(code);
-    }
+    if (bcCodes.has(code)) bcCodes.delete(code);
+    else bcCodes.add(code);
 
     chip.classList.toggle("sel");
-
     updateBcBar();
   });
 
   $("#btnSend").addEventListener("click", async () => {
-    if (!bcVideo || !bcCodes.size) {
-      return;
-    }
+    if (!bcVideo || !bcCodes.size) return;
 
     try {
       const response = await jfetch("/api/admin/broadcast", {
         method: "POST",
-        body: {
-          videoId: bcVideo,
-          codes: [...bcCodes],
-        },
+        body: { videoId: bcVideo, codes: [...bcCodes] },
       });
-
       toast(`Live on ${response.updated} screens.`);
-
       bcCodes.clear();
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
@@ -993,23 +663,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("#btnStandby").addEventListener("click", async () => {
-    if (!bcCodes.size) {
-      return;
-    }
+    if (!bcCodes.size) return;
 
     try {
       const response = await jfetch("/api/admin/broadcast", {
         method: "POST",
-        body: {
-          videoId: null,
-          codes: [...bcCodes],
-        },
+        body: { videoId: null, codes: [...bcCodes] },
       });
-
       toast(`Standby: ${response.updated} screens.`);
-
       bcCodes.clear();
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
@@ -1030,55 +692,13 @@ document.addEventListener("DOMContentLoaded", () => {
           autoReloadOnError: $("#autoReload").checked,
         },
       });
-
       toast("Automation saved.");
-
       refresh();
     } catch (error) {
       toast(error.message, "err");
     }
   });
 
-  $("#loginForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-
-    try {
-      await jfetch("/api/admin/login", {
-        method: "POST",
-        body: {
-          password: $("#loginPass").value,
-        },
-      });
-
-      $("#loginErr").hidden = true;
-
-      hideLogin();
-
-      startLoops();
-    } catch (error) {
-      $("#loginErr").textContent = error.message;
-      $("#loginErr").hidden = false;
-    }
-  });
-
-  $("#btnLogout").addEventListener("click", async () => {
-    await jfetch("/api/admin/logout", {
-      method: "POST",
-    }).catch(() => {});
-
-    location.reload();
-  });
-
-  jfetch("/api/admin/auth/check")
-    .then((response) => {
-      if (response.authed) {
-        hideLogin();
-        startLoops();
-      } else {
-        showLogin();
-      }
-    })
-    .catch(() => {
-      showLogin();
-    });
+  // NO LOGIN ANYWHERE. JUST START.
+  startLoops();
 });
