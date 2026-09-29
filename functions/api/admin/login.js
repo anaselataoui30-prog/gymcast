@@ -3,7 +3,11 @@ import {
   json,
 } from "../../../lib/core.js";
 
-export async function onRequestPost(context) {
+export async function onRequest(context) {
+  if (context.request.method !== "POST") {
+    return json({ error: "Method not allowed." }, 405);
+  }
+
   const { env, request } = context;
 
   if (!env.ADMIN_PASSWORD) {
@@ -33,13 +37,14 @@ export async function onRequestPost(context) {
 
   const cookie = await createSessionCookie(env, secure);
 
-  return json(
+  return new Response(
+    JSON.stringify({ ok: true }),
     {
-      ok: true,
-    },
-    200,
-    {
-      "set-cookie": cookie,
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "set-cookie": cookie,
+      },
     }
   );
 }
