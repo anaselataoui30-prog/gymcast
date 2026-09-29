@@ -1,6 +1,5 @@
-// NO PASSWORD MODE (temporary, for building).
-// Every admin request is allowed through.
-// Real security will be added later with Cloudflare Access (no code needed).
+// SECURITY REMOVED ON PURPOSE WHILE BUILDING.
+// Every admin API request goes straight through.
 export async function onRequest(context) {
   return context.next();
 }
