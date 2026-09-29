@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GYMCAST TV</title>
   <style>
-    body { margin: 0; background: #0b0d12; color: #e9edf5; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; }
+    body { margin: 0; background: #0b0d12; color: #e9edf5; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; overflow: hidden; }
     .box { background: #12161f; padding: 40px; border-radius: 8px; text-align: center; border-top: 5px solid #ffb02e; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 500px; width: 90%; }
     h1 { margin: 0 0 10px 0; color: #ffb02e; letter-spacing: 2px; }
     p { color: #8791a5; margin-bottom: 25px; }
@@ -21,8 +21,17 @@
     #player iframe, #player video { width: 100%; height: 100%; border: none; object-fit: contain; }
     #standby-text { color: #333; font-size: 80px; font-weight: 900; letter-spacing: 10px; }
     
-    .reset-btn { position: fixed; bottom: 15px; right: 15px; color: #444; font-size: 12px; cursor: pointer; background: none; border: 1px solid #333; padding: 5px 10px; border-radius: 4px; }
+    .reset-btn { position: fixed; bottom: 15px; right: 15px; color: #444; font-size: 12px; cursor: pointer; background: none; border: 1px solid #333; padding: 5px 10px; border-radius: 4px; z-index: 20; }
     .reset-btn:hover { color: #ff4d3d; border-color: #ff4d3d; }
+
+    /* Sound Unlock Overlay */
+    #sound-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7); z-index: 30;
+      display: none; align-items: center; justify-content: center;
+      cursor: pointer; flex-direction: column; gap: 20px;
+    }
+    #sound-overlay span { color: #ffb02e; font-size: 32px; font-weight: 800; letter-spacing: 2px; text-align: center; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
   </style>
 </head>
 <body>
@@ -42,6 +51,10 @@
 
   <div id="player"></div>
 
+  <div id="sound-overlay">
+    <span>🔊 TAP TO ENABLE SOUND</span>
+  </div>
+
   <button class="reset-btn" onclick="if(confirm('Forget this TV and start over?')){localStorage.clear(); location.reload();}">Reset TV</button>
 
   <script>
@@ -52,11 +65,12 @@
     const errorEl = document.getElementById("error");
     const digits = document.querySelectorAll(".digit");
     const connectBtn = document.getElementById("connectBtn");
+    const soundOverlay = document.getElementById("sound-overlay");
 
     // Auto-focus next box
     digits.forEach((d, i) => {
       d.addEventListener("input", () => {
-        d.value = d.value.replace(/\D/g, ''); // numbers only
+        d.value = d.value.replace(/\D/g, '');
         if (d.value && i < 3) digits[i+1].focus();
       });
       d.addEventListener("keydown", (e) => {
@@ -64,7 +78,6 @@
       });
     });
 
-    // If we already have a code, skip the menu
     if (savedCode) {
       activation.style.display = "none";
       startPolling(savedCode);
@@ -101,7 +114,6 @@
     let currentVideoUrl = "";
 
     async function startPolling(code) {
-      // Try fullscreen silently (wrapped in try/catch so it never crashes the page)
       try { document.documentElement.requestFullscreen?.(); } catch(e){}
 
       async function poll() {
@@ -127,7 +139,7 @@
       }
 
       poll();
-      setInterval(poll, 15000); // Check every 15 seconds
+      setInterval(poll, 15000);
     }
 
     function playVideo(video) {
@@ -146,17 +158,53 @@
           }
         } catch(e) { id = video.url; }
         
-        player.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&loop=1&playlist=${id}&controls=0" allow="autoplay; fullscreen"></iframe>`;
+        // MUTE=0 ENABLES SOUND!
+        player.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=0&loop=1&playlist=${id}&controls=0&rel=0&modestbranding=1" allow="autoplay; fullscreen; encrypted-media" allowfullscreen></iframe>`;
+        
+        // Show sound overlay for YouTube just in case browser blocks iframe audio without interaction
+        soundOverlay.style.display = "flex";
       } else {
-        // Direct MP4 / R2 video
-        player.innerHTML = `<video src="${video.url}" autoplay muted loop playsinline></video>`;
+        // Direct MP4 / R2 video. REMOVED "muted" attribute!
+        player.innerHTML = `<video id="html-vid" src="${video.url}" autoplay loop playsinline></video>`;
+        
+        const vid = document.getElementById("html-vid");
+        const playPromise = vid.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(e => {
+            // If browser blocks unmuted autoplay, show the overlay
+            soundOverlay.style.display = "flex";
+          });
+        }
       }
     }
 
     function showStandby() {
       player.style.display = "flex";
       player.innerHTML = `<div id="standby-text">STANDBY</div>`;
+      soundOverlay.style.display = "none";
     }
+
+    // Handle the sound overlay tap
+    soundOverlay.addEventListener("click", () => {
+      soundOverlay.style.display = "none";
+      
+      // Unmute HTML5 video if it exists
+      const vid = document.getElementById("html-vid");
+      if (vid) {
+        vid.muted = false;
+        vid.play().catch(e => console.log("Still blocked", e));
+      }
+      
+      // For YouTube, reloading the iframe after a click guarantees sound starts
+      const iframe = player.querySelector("iframe");
+      if (iframe) {
+         const src = iframe.src;
+         iframe.src = "";
+         setTimeout(() => { iframe.src = src; }, 100);
+      }
+      
+      try { document.documentElement.requestFullscreen?.(); } catch(e){}
+    });
   </script>
 </body>
 </html>
