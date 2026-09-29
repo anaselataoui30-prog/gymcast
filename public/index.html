@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GYMCAST Screen</title>
+  <link rel="stylesheet" href="/assets/css/player.css" />
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+</head>
+<body>
+  <section class="stage" id="stage-activate">
+    <div class="act-card">
+      <div class="brand">
+        <span class="bars7">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </span>
+        GYMCAST
+      </div>
+
+      <p class="kicker">SCREEN ACTIVATION</p>
+      <h1>ENTER SCREEN CODE</h1>
+
+      <div class="digits">
+        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 1" />
+        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 2" />
+        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 3" />
+        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 4" />
+      </div>
+
+      <button id="btnActivate" class="btn-big">CONNECT SCREEN</button>
+
+      <p class="hint">
+        The code is created in the GYMCAST Control Room.
+        Once connected, this screen remembers it forever.
+      </p>
+
+      <p id="actError" class="err" hidden></p>
+    </div>
+  </section>
+
+  <section class="stage standby" id="stage-standby">
+    <div class="bars" id="standbyBars"></div>
+
+    <div class="plate">
+      <div class="p-brand">GYMCAST</div>
+      <div id="clockBig" class="p-clock">--:--:--</div>
+      <div id="standbyMeta" class="p-meta"></div>
+    </div>
+  </section>
+
+  <div id="player"></div>
+  <div id="tvChip" class="chip-tv" hidden></div>
+  <div id="lost" class="lost" hidden>CONNECTION LOST — RETRYING</div>
+
+  <div id="startOverlay" class="start-ov">
+    <div class="start-inner">
+      <span class="bars7">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </span>
+      <strong>TAP TO START THIS SCREEN</strong>
+    </div>
+  </div>
+
+  <script src="/assets/js/player.js"></script>
+</body>
+</html>

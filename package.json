@@ -1,0 +1,11 @@
+{
+  "name": "gymcast",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev public"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}
