@@ -6,7 +6,7 @@ import {
 } from "../../../../lib/core.js";
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = ["mp4", "webm", "mov", "m4v", "m3u8", "ts"];
+const ALLOWED_EXTENSIONS = ["mp4", "webm", "mov", "m4v", "mkv", "avi", "m3u8", "ts"];
 
 export async function onRequest(context) {
   if (context.request.method !== "POST") {
