@@ -55,6 +55,12 @@
     const connectBtn = document.getElementById("connectBtn");
     const soundOverlay = document.getElementById("sound-overlay");
 
+    let currentPlaylist = [];
+    let currentIndex = 0;
+    let ytPlayer = null;
+    let htmlVid = null;
+    let soundUnlocked = false;
+
     digits.forEach((d, i) => {
       d.addEventListener("input", () => { d.value = d.value.replace(/\D/g, ''); if (d.value && i < 3) digits[i+1].focus(); });
       d.addEventListener("keydown", (e) => { if (e.key === "Backspace" && !d.value && i > 0) digits[i-1].focus(); });
@@ -70,19 +76,17 @@
         const res = await fetch("/api/tv/activate", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({code}) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Code not found");
-        localStorage.setItem(LS_CODE, code); activation.style.display = "none"; startPolling(code);
+        localStorage.setItem(LS_CODE, code);
+        activation.style.display = "none";
+        startPolling(code);
       } catch(e) { errorEl.innerText = e.message; connectBtn.disabled = false; }
     });
-
-    let currentPlaylist = [];
-    let currentIndex = 0;
-    let ytPlayer = null;
-    let htmlVid = null;
 
     window.onYouTubeIframeAPIReady = function() { console.log("YT API Ready"); };
 
     async function startPolling(code) {
       try { document.documentElement.requestFullscreen?.(); } catch(e){}
+
       async function poll() {
         try {
           const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
@@ -91,52 +95,64 @@
           const incomingPlaylist = data.playlist || [];
           const incomingIds = incomingPlaylist.map(v => v.id).join(',');
           const currentIds = currentPlaylist.map(v => v.id).join(',');
-          
+
           if (incomingIds !== currentIds) {
             currentPlaylist = incomingPlaylist;
-            currentIndex = 0; 
+            currentIndex = 0;
             playCurrent();
           } else if (currentPlaylist.length === 0 && player.style.display !== "flex") {
             showStandby();
           }
         } catch(e) { console.error("Poll error", e); }
       }
-      poll(); setInterval(poll, 15000);
+
+      poll();
+      setInterval(poll, 15000);
     }
 
     function getYTId(url) {
-      try { const u = new URL(url); if (u.hostname.includes("youtu.be")) return u.pathname.slice(1); if (u.pathname.includes("/shorts/") || u.pathname.includes("/embed/") || u.pathname.includes("/live/")) return u.pathname.split("/").pop(); return u.searchParams.get("v"); } catch(e) { return ""; }
+      try {
+        const u = new URL(url);
+        if (u.hostname.includes("youtu.be")) return u.pathname.slice(1);
+        if (u.pathname.includes("/shorts/") || u.pathname.includes("/embed/") || u.pathname.includes("/live/")) return u.pathname.split("/").pop();
+        return u.searchParams.get("v");
+      } catch(e) { return ""; }
     }
 
     function playCurrent() {
       if (currentPlaylist.length === 0) { showStandby(); return; }
+
       player.style.display = "block";
       const video = currentPlaylist[currentIndex];
       const isYT = /youtube\.com|youtu\.be/i.test(video.url);
-      
+
       if (ytPlayer) { try { ytPlayer.destroy(); } catch(e){} ytPlayer = null; }
       if (htmlVid) { htmlVid.removeEventListener('ended', playNext); htmlVid.removeEventListener('error', playNext); htmlVid = null; }
-      
+
       if (isYT) {
-        let id = getYTId(video.url);
-        player.innerHTML = `<div id="yt-player-container" style="width:100%;height:100%;"></div>`;
+        const id = getYTId(video.url);
+        player.innerHTML = '<div id="yt-player-container" style="width:100%;height:100%;"></div>';
         ytPlayer = new YT.Player('yt-player-container', {
           videoId: id,
           playerVars: { autoplay: 1, mute: 0, loop: 0, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
           events: {
-            'onReady': (event) => { event.target.playVideo(); event.target.unMute(); event.target.setVolume(100); },
-            'onStateChange': (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
-            'onError': () => { playNext(); }
+            onReady: (event) => {
+              event.target.playVideo();
+              if (soundUnlocked) { event.target.unMute(); event.target.setVolume(100); }
+            },
+            onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
+            onError: () => playNext()
           }
         });
-        soundOverlay.style.display = "flex"; 
+        if (!soundUnlocked) soundOverlay.style.display = "flex";
       } else {
-        player.innerHTML = `<video id="html-vid" src="${video.url}" autoplay loop="false" playsinline></video>`;
+        // NO loop attribute here. loop="false" would loop forever (HTML boolean trap).
+        player.innerHTML = `<video id="html-vid" src="${video.url}" autoplay playsinline></video>`;
         htmlVid = document.getElementById("html-vid");
         htmlVid.addEventListener('ended', playNext);
         htmlVid.addEventListener('error', playNext);
-        const playPromise = htmlVid.play();
-        if (playPromise !== undefined) playPromise.catch(e => { soundOverlay.style.display = "flex"; });
+        const p = htmlVid.play();
+        if (p !== undefined) p.catch(() => { if (!soundUnlocked) soundOverlay.style.display = "flex"; });
       }
     }
 
@@ -146,11 +162,16 @@
       playCurrent();
     }
 
-    function showStandby() { player.style.display = "flex"; player.innerHTML = `<div id="standby-text">STANDBY</div>`; soundOverlay.style.display = "none"; }
+    function showStandby() {
+      player.style.display = "flex";
+      player.innerHTML = `<div id="standby-text">STANDBY</div>`;
+      soundOverlay.style.display = "none";
+    }
 
     soundOverlay.addEventListener("click", () => {
+      soundUnlocked = true;
       soundOverlay.style.display = "none";
-      if (htmlVid) { htmlVid.muted = false; htmlVid.play().catch(e => console.log("Blocked", e)); }
+      if (htmlVid) { htmlVid.muted = false; htmlVid.play().catch(() => {}); }
       if (ytPlayer && ytPlayer.unMute) { ytPlayer.unMute(); ytPlayer.setVolume(100); ytPlayer.playVideo(); }
       try { document.documentElement.requestFullscreen?.(); } catch(e){}
     });
