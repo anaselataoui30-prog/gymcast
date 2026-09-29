@@ -12,10 +12,9 @@ export async function onRequest(context) {
   if (!codes.length) return json({ error: "No screens selected." }, 400);
 
   const state = await readState(context.env);
-  
-  // Verify all videos in playlist exist
+
   if (playlistIds.length > 0) {
-    const validIds = new Set(state.videos.map(v => v.id));
+    const validIds = new Set(state.videos.map((v) => v.id));
     for (const id of playlistIds) {
       if (!validIds.has(id)) return json({ error: `Video ${id} not found.` }, 404);
     }
