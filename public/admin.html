@@ -68,17 +68,23 @@
       <div id="videoList" class="vlist"></div>
     </section>
 
-    <section class="panel">
+        <section class="panel">
       <div class="p-head">
-        <h2>02 / OUTPUT — SEND TO SCREENS</h2>
-        <p>Pick a video, pick screens, then send.</p>
+        <h2>02 / OUTPUT — BUILD PLAYLIST & SEND</h2>
+        <p>Add videos from the library to your queue, order them, and send to screens.</p>
       </div>
 
       <div class="broadcast">
-        <label>
-          Video to send
-          <select id="bcVideoSelect"></select>
-        </label>
+        <div class="playlist-builder">
+          <div class="lib-col">
+            <h4>Available Videos</h4>
+            <div id="availableVideos" class="vid-list"></div>
+          </div>
+          <div class="queue-col">
+            <h4>Playlist Queue</h4>
+            <div id="playlistQueue" class="vid-list"></div>
+          </div>
+        </div>
 
         <div id="tvChips" class="tvchips"></div>
 
@@ -86,7 +92,7 @@
           <span id="bcInfo">No screens selected</span>
           <div>
             <button id="btnStandby" class="btn ghost" type="button">SEND TO STANDBY</button>
-            <button id="btnSend" class="btn danger" type="button">SEND VIDEO</button>
+            <button id="btnSend" class="btn danger" type="button">SEND PLAYLIST</button>
           </div>
         </div>
       </div>
