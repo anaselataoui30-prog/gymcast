@@ -3,7 +3,7 @@ import {
   normalizeCode,
   readState,
   writeState,
-} from "../../../../lib/core.js";
+} from "../../../../../lib/core.js";
 
 export async function onRequest(context) {
   if (context.request.method !== "POST") {
