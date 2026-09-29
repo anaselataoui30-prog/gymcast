@@ -1,66 +1,162 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GYMCAST Screen</title>
-  <link rel="stylesheet" href="/assets/css/player.css" />
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GYMCAST TV</title>
+  <style>
+    body { margin: 0; background: #0b0d12; color: #e9edf5; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; }
+    .box { background: #12161f; padding: 40px; border-radius: 8px; text-align: center; border-top: 5px solid #ffb02e; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 500px; width: 90%; }
+    h1 { margin: 0 0 10px 0; color: #ffb02e; letter-spacing: 2px; }
+    p { color: #8791a5; margin-bottom: 25px; }
+    .digits { display: flex; gap: 15px; margin-bottom: 25px; justify-content: center; }
+    .digit { width: 70px; height: 90px; font-size: 48px; font-weight: bold; text-align: center; background: #0c0f16; color: #ffb02e; border: 2px solid #232a3a; border-radius: 6px; }
+    .digit:focus { border-color: #ffb02e; outline: none; box-shadow: 0 0 10px rgba(255,176,46,0.2); }
+    button { background: #ffb02e; color: #000; border: none; padding: 16px 40px; font-size: 18px; font-weight: 800; cursor: pointer; border-radius: 4px; letter-spacing: 1px; transition: 0.2s; width: 100%; }
+    button:hover { background: #ffc55e; transform: translateY(-2px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    #error { color: #ff4d3d; margin-top: 15px; min-height: 24px; font-weight: bold; }
+    
+    #player { position: fixed; top:0; left:0; width:100%; height:100%; background:black; display:none; z-index: 10; align-items: center; justify-content: center; }
+    #player iframe, #player video { width: 100%; height: 100%; border: none; object-fit: contain; }
+    #standby-text { color: #333; font-size: 80px; font-weight: 900; letter-spacing: 10px; }
+    
+    .reset-btn { position: fixed; bottom: 15px; right: 15px; color: #444; font-size: 12px; cursor: pointer; background: none; border: 1px solid #333; padding: 5px 10px; border-radius: 4px; }
+    .reset-btn:hover { color: #ff4d3d; border-color: #ff4d3d; }
+  </style>
 </head>
 <body>
-  <section class="stage" id="stage-activate">
-    <div class="act-card">
-      <div class="brand">
-        <span class="bars7">
-          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        </span>
-        GYMCAST
-      </div>
 
-      <p class="kicker">SCREEN ACTIVATION</p>
-      <h1>ENTER SCREEN CODE</h1>
-
-      <div class="digits">
-        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 1" />
-        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 2" />
-        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 3" />
-        <input class="digit" inputmode="numeric" maxlength="1" aria-label="digit 4" />
-      </div>
-
-      <button id="btnActivate" class="btn-big">CONNECT SCREEN</button>
-
-      <p class="hint">
-        The code is created in the GYMCAST Control Room.
-        Once connected, this screen remembers it forever.
-      </p>
-
-      <p id="actError" class="err" hidden></p>
+  <div id="activation" class="box">
+    <h1>GYMCAST TV</h1>
+    <p>Enter the 4-digit code for this screen:</p>
+    <div class="digits">
+      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
+      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
+      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
+      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
     </div>
-  </section>
-
-  <section class="stage standby" id="stage-standby">
-    <div class="bars" id="standbyBars"></div>
-
-    <div class="plate">
-      <div class="p-brand">GYMCAST</div>
-      <div id="clockBig" class="p-clock">--:--:--</div>
-      <div id="standbyMeta" class="p-meta"></div>
-    </div>
-  </section>
-
-  <div id="player"></div>
-  <div id="tvChip" class="chip-tv" hidden></div>
-  <div id="lost" class="lost" hidden>CONNECTION LOST — RETRYING</div>
-
-  <div id="startOverlay" class="start-ov">
-    <div class="start-inner">
-      <span class="bars7">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </span>
-      <strong>TAP TO START THIS SCREEN</strong>
-    </div>
+    <button id="connectBtn">CONNECT SCREEN</button>
+    <div id="error"></div>
   </div>
 
-  <script src="/assets/js/player.js"></script>
+  <div id="player"></div>
+
+  <button class="reset-btn" onclick="if(confirm('Forget this TV and start over?')){localStorage.clear(); location.reload();}">Reset TV</button>
+
+  <script>
+    const LS_CODE = "gymcast_tv_code";
+    const savedCode = localStorage.getItem(LS_CODE);
+    const activation = document.getElementById("activation");
+    const player = document.getElementById("player");
+    const errorEl = document.getElementById("error");
+    const digits = document.querySelectorAll(".digit");
+    const connectBtn = document.getElementById("connectBtn");
+
+    // Auto-focus next box
+    digits.forEach((d, i) => {
+      d.addEventListener("input", () => {
+        d.value = d.value.replace(/\D/g, ''); // numbers only
+        if (d.value && i < 3) digits[i+1].focus();
+      });
+      d.addEventListener("keydown", (e) => {
+        if (e.key === "Backspace" && !d.value && i > 0) digits[i-1].focus();
+      });
+    });
+
+    // If we already have a code, skip the menu
+    if (savedCode) {
+      activation.style.display = "none";
+      startPolling(savedCode);
+    }
+
+    connectBtn.addEventListener("click", async () => {
+      const code = Array.from(digits).map(d => d.value).join("");
+      if (code.length < 4) {
+        errorEl.innerText = "Please enter all 4 digits";
+        return;
+      }
+      
+      errorEl.innerText = "Connecting...";
+      connectBtn.disabled = true;
+
+      try {
+        const res = await fetch("/api/tv/activate", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({code})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Code not found");
+        
+        localStorage.setItem(LS_CODE, code);
+        activation.style.display = "none";
+        startPolling(code);
+      } catch(e) {
+        errorEl.innerText = e.message;
+        connectBtn.disabled = false;
+      }
+    });
+
+    let currentVideoUrl = "";
+
+    async function startPolling(code) {
+      // Try fullscreen silently (wrapped in try/catch so it never crashes the page)
+      try { document.documentElement.requestFullscreen?.(); } catch(e){}
+
+      async function poll() {
+        try {
+          const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
+          if (res.status === 404) {
+            localStorage.removeItem(LS_CODE);
+            location.reload();
+            return;
+          }
+          const data = await res.json();
+          
+          if (data.video && data.video.url !== currentVideoUrl) {
+            currentVideoUrl = data.video.url;
+            playVideo(data.video);
+          } else if (!data.video && currentVideoUrl !== "standby") {
+            currentVideoUrl = "standby";
+            showStandby();
+          }
+        } catch(e) {
+          console.error("Poll error", e);
+        }
+      }
+
+      poll();
+      setInterval(poll, 15000); // Check every 15 seconds
+    }
+
+    function playVideo(video) {
+      player.style.display = "block";
+      const isYT = /youtube\.com|youtu\.be/i.test(video.url);
+      
+      if (isYT) {
+        let id = "";
+        try {
+          const u = new URL(video.url);
+          if (u.hostname.includes("youtu.be")) id = u.pathname.slice(1);
+          else if (u.pathname.includes("/shorts/") || u.pathname.includes("/embed/") || u.pathname.includes("/live/")) {
+             id = u.pathname.split("/").pop();
+          } else {
+             id = u.searchParams.get("v");
+          }
+        } catch(e) { id = video.url; }
+        
+        player.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&loop=1&playlist=${id}&controls=0" allow="autoplay; fullscreen"></iframe>`;
+      } else {
+        // Direct MP4 / R2 video
+        player.innerHTML = `<video src="${video.url}" autoplay muted loop playsinline></video>`;
+      }
+    }
+
+    function showStandby() {
+      player.style.display = "flex";
+      player.innerHTML = `<div id="standby-text">STANDBY</div>`;
+    }
+  </script>
 </body>
 </html>
