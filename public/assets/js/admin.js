@@ -111,13 +111,67 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#addVideoForm").addEventListener("submit", async (event) => { event.preventDefault(); try { await jfetch("/api/admin/videos", { method: "POST", body: { title: $("#avTitle").value, url: $("#avUrl").value } }); $("#avTitle").value = ""; $("#avUrl").value = ""; toast("Video link added."); refresh(); } catch (error) { toast(error.message, "err"); } });
 
-  $("#uploadVideoForm").addEventListener("submit", (event) => { event.preventDefault(); const form = event.currentTarget; const file = $("#upFile").files[0]; if (!file) { toast("Choose a file first.", "err"); return; } const formData = new FormData(); formData.append("title", $("#upTitle").value.trim() || file.name.replace(/\.[^.]+$/, "")); formData.append("file", file); const progress = $("#upProgress"); progress.hidden = false; progress.value = 0; const xhr = new XMLHttpRequest(); xhr.open("POST", "/api/admin/videos/upload"); xhr.upload.onprogress = (uploadEvent) => { if (uploadEvent.lengthComputable) progress.value = Math.round((uploadEvent.loaded / uploadEvent.total) * 100); }; xhr.onload = () => { progress.hidden = true; let data = {}; try { data = JSON.parse(xhr.responseText); } catch {} if (xhr.status >= 200 && xhr.status < 300) { toast("Uploaded to R2."); form.reset(); refresh(); } else { toast(data.error || "Upload failed.", "err"); } }; xhr.onerror = () => { progress.hidden = true; toast("Upload failed.", "err"); }; xhr.send(formData); });
+  // ===== UPLOAD: small = single request, big = chunked multipart =====
+  $("#uploadVideoForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = $("#upFile").files[0];
+    if (!file) { toast("Choose a file first.", "err"); return; }
+    if (!file.size) { toast("File is empty.", "err"); return; }
+
+    const progress = $("#upProgress");
+    progress.hidden = false;
+    progress.value = 0;
+
+    const title = $("#upTitle").value.trim() || file.name.replace(/\.[^.]+$/, "");
+    const BIG = 50 * 1024 * 1024;
+
+    if (file.size <= BIG) {
+      const formData = new FormData();
+      formData.append("title", title);
+      formData.append("file", file);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/admin/videos/upload");
+      xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) progress.value = Math.round((ev.loaded / ev.total) * 100); };
+      xhr.onload = () => { progress.hidden = true; let data = {}; try { data = JSON.parse(xhr.responseText); } catch {} if (xhr.status >= 200 && xhr.status < 300) { toast("Uploaded to R2."); form.reset(); refresh(); } else { toast(data.error || "Upload failed.", "err"); } };
+      xhr.onerror = () => { progress.hidden = true; toast("Upload failed.", "err"); };
+      xhr.send(formData);
+      return;
+    }
+
+    (async () => {
+      const CHUNK = 10 * 1024 * 1024;
+      try {
+        const start = await jfetch("/api/admin/videos/upload-start", { method: "POST", body: { name: file.name, size: file.size, type: file.type } });
+        const parts = [];
+        let partNumber = 1;
+        for (let offset = 0; offset < file.size; offset += CHUNK) {
+          const blob = file.slice(offset, offset + CHUNK);
+          const buf = await blob.arrayBuffer();
+          const res = await fetch("/api/admin/videos/upload-part", { method: "POST", headers: { "x-gc-key": start.key, "x-gc-upload": start.uploadId, "x-gc-part": String(partNumber) }, body: buf });
+          if (!res.ok) { let d = {}; try { d = await res.json(); } catch {} throw new Error(d.error || `Chunk ${partNumber} failed (${res.status})`); }
+          const d = await res.json();
+          parts.push({ partNumber: d.partNumber, etag: d.etag });
+          progress.value = Math.min(99, Math.round(((offset + blob.size) / file.size) * 100));
+        }
+        parts.sort((a, b) => a.partNumber - b.partNumber);
+        await jfetch("/api/admin/videos/upload-complete", { method: "POST", body: { key: start.key, uploadId: start.uploadId, parts, title } });
+        progress.value = 100;
+        toast("Uploaded to R2.");
+        form.reset();
+        refresh();
+      } catch (error) {
+        toast(error.message, "err");
+      } finally {
+        setTimeout(() => { progress.hidden = true; }, 800);
+      }
+    })();
+  });
 
   $("#btnImportR2").addEventListener("click", async () => { try { const { files } = await jfetch("/api/admin/r2-files"); if (!files.length) { toast("No files found in R2", "err"); return; } const result = await modal({ title: "IMPORT FROM R2", submit: "Import", fields: [ { name: "key", label: "R2 file", type: "select", options: files.map((file) => ({ v: file.key, l: `${file.key} · ${(file.size / 1048576).toFixed(1)} MB` })) }, { name: "title", label: "Title (optional)" } ] }); if (!result) return; const file = files.find((item) => item.key === result.key); if (!file) return; await jfetch("/api/admin/videos", { method: "POST", body: { title: result.title || file.key.split("/").pop(), url: file.url } }); toast("R2 video imported."); refresh(); } catch (error) { toast(error.message, "err"); } });
 
   $("#videoList").addEventListener("click", async (event) => { const button = event.target.closest("[data-vact]"); if (!button) return; const { vact, id, title, url } = button.dataset; try { if (vact === "edit") { const result = await modal({ title: "EDIT VIDEO", fields: [ { name: "title", label: "Title", value: title }, { name: "url", label: "URL", value: url, type: "url" } ] }); if (!result) return; await jfetch(`/api/admin/videos/${id}`, { method: "PATCH", body: { title: result.title, url: result.url } }); toast("Video updated."); refresh(); } if (vact === "del") { const confirmed = await modal({ title: `DELETE “${title}”?`, submit: "Delete", danger: true, fields: [{ name: "confirm", label: "Type DELETE to confirm", pattern: "DELETE" }] }); if (!confirmed) return; await jfetch(`/api/admin/videos/${id}`, { method: "DELETE" }); toast("Video deleted."); refresh(); } } catch (error) { toast(error.message, "err"); } });
 
-  // Playlist builder events
   $("#availableVideos").addEventListener("click", (e) => { const btn = e.target.closest(".add-btn"); if (btn) { const id = e.target.closest(".avail-vid").dataset.id; if (!currentPlaylistIds.includes(id)) { currentPlaylistIds.push(id); renderBroadcast(); } } });
 
   $("#playlistQueue").addEventListener("click", (e) => { const vidEl = e.target.closest(".queue-vid"); if (!vidEl) return; const id = vidEl.dataset.id; const index = currentPlaylistIds.indexOf(id); if (e.target.closest(".remove-btn")) currentPlaylistIds.splice(index, 1); else if (e.target.closest(".move-btn[data-act='up']") && index > 0) [currentPlaylistIds[index-1], currentPlaylistIds[index]] = [currentPlaylistIds[index], currentPlaylistIds[index-1]]; else if (e.target.closest(".move-btn[data-act='down']") && index < currentPlaylistIds.length - 1) [currentPlaylistIds[index+1], currentPlaylistIds[index]] = [currentPlaylistIds[index], currentPlaylistIds[index+1]]; renderBroadcast(); });
