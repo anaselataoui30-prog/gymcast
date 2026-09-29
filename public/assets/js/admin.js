@@ -1,63 +1,177 @@
 "use strict";
 
+// ============================================================
+// GYMCAST CONTROL ROOM — full admin logic (no login, playlists,
+// chunked R2 uploads, screens manager, automation)
+// ============================================================
+
 const GYMS = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"];
-const GYM_NAMES = { G1: "DOWNTOWN", G2: "RIVERSIDE", G3: "NORTHGATE", G4: "EASTSIDE", G5: "HARBOR", G6: "OLD MILL", G7: "AIRPORT" };
+
+const GYM_NAMES = {
+  G1: "DOWNTOWN",
+  G2: "RIVERSIDE",
+  G3: "NORTHGATE",
+  G4: "EASTSIDE",
+  G5: "HARBOR",
+  G6: "OLD MILL",
+  G7: "AIRPORT",
+};
+
 const ONLINE_MS = 15 * 60 * 1000;
 
-let D = { tvs: [], videos: [], settings: {}, presence: {}, nextCode: "0001", mediaBaseUrl: null };
+let D = {
+  tvs: [],
+  videos: [],
+  settings: {},
+  presence: {},
+  nextCode: "0001",
+  mediaBaseUrl: null,
+};
+
 let gymFilter = "ALL";
 let currentPlaylistIds = [];
 const bcCodes = new Set();
 
+// ---------- tiny helpers ----------
 const $ = (selector, el = document) => el.querySelector(selector);
 const $$ = (selector, el = document) => [...el.querySelectorAll(selector)];
-const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+
+const esc = (value = "") =>
+  String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
 
 async function jfetch(url, { method = "GET", body } = {}) {
-  const res = await fetch(url, { method, credentials: "include", headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(url, {
+    method,
+    credentials: "include",
+    headers: body ? { "content-type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
   let data = {};
   try { data = await res.json(); } catch {}
-  if (!res.ok) { const error = new Error(data.error || `Request failed (${res.status})`); error.status = res.status; throw error; }
+
+  if (!res.ok) {
+    const error = new Error(data.error || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
   return data;
 }
 
-function toast(message, kind = "ok") { const el = document.createElement("div"); el.className = `toast ${kind}`; el.textContent = message; $("#toasts").appendChild(el); setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 400); }, 3500); }
-function timeAgo(timestamp) { const seconds = Math.floor((Date.now() - timestamp) / 1000); if (seconds < 90) return "just now"; if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`; return `${Math.floor(seconds / 86400)}d ago`; }
-function badgeFor(video) { if (video.source === "r2" || (D.mediaBaseUrl && video.url.startsWith(D.mediaBaseUrl))) return { cls: "r2", label: "R2" }; if (/(?:youtube\.com|youtu\.be)/i.test(video.url)) return { cls: "yt", label: "YOUTUBE" }; if (/vimeo\.com/i.test(video.url)) return { cls: "vimeo", label: "VIMEO" }; if (/\.m3u8(\?|$)/i.test(video.url)) return { cls: "hls", label: "HLS" }; return { cls: "direct", label: "DIRECT" }; }
-function statusOf(tv) { const timestamp = D.presence[tv.code]; if (!timestamp || Date.now() - timestamp > ONLINE_MS) return "off"; return (tv.playlistIds && tv.playlistIds.length > 0) ? "air" : "idle"; }
+function toast(message, kind = "ok") {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  $("#toasts").appendChild(el);
 
-async function refresh() { try { D = await jfetch("/api/admin/dashboard"); render(); } catch (error) { toast(error.message, "err"); } }
+  setTimeout(() => {
+    el.classList.add("out");
+    setTimeout(() => el.remove(), 400);
+  }, 3500);
+}
+
+function timeAgo(timestamp) {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 90) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function badgeFor(video) {
+  if (video.source === "r2" || (D.mediaBaseUrl && video.url.startsWith(D.mediaBaseUrl))) {
+    return { cls: "r2", label: "R2" };
+  }
+  if (/(?:youtube\.com|youtu\.be)/i.test(video.url)) return { cls: "yt", label: "YOUTUBE" };
+  if (/vimeo\.com/i.test(video.url)) return { cls: "vimeo", label: "VIMEO" };
+  if (/\.m3u8(\?|$)/i.test(video.url)) return { cls: "hls", label: "HLS" };
+  return { cls: "direct", label: "DIRECT" };
+}
+
+function statusOf(tv) {
+  const timestamp = D.presence[tv.code];
+  if (!timestamp || Date.now() - timestamp > ONLINE_MS) return "off";
+  return (tv.playlistIds && tv.playlistIds.length > 0) ? "air" : "idle";
+}
+
+// ---------- data + rendering ----------
+async function refresh() {
+  try {
+    D = await jfetch("/api/admin/dashboard");
+    render();
+  } catch (error) {
+    toast(error.message, "err");
+  }
+}
 
 function render() {
-  const editing = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".tname,.tgym,#autoForm,.addform,.uploadform") : null;
-  renderStats(); renderGymChips(); renderLibrary();
-  if (!editing) { renderGrid(); renderBroadcast(); renderAuto(); }
+  const editing =
+    document.activeElement && document.activeElement.closest
+      ? document.activeElement.closest(".tname,.tgym,#autoForm,.addform,.uploadform")
+      : null;
+
+  renderStats();
+  renderGymChips();
+  renderLibrary();
+
+  if (!editing) {
+    renderGrid();
+    renderBroadcast();
+    renderAuto();
+  }
+
   $("#countScreens").textContent = D.tvs.length;
 }
 
-function renderStats() { $("#statTotal").textContent = D.tvs.length; $("#statOnline").textContent = D.tvs.filter((tv) => statusOf(tv) !== "off").length; $("#statOnAir").textContent = D.tvs.filter((tv) => statusOf(tv) === "air").length; }
+function renderStats() {
+  $("#statTotal").textContent = D.tvs.length;
+  $("#statOnline").textContent = D.tvs.filter((tv) => statusOf(tv) !== "off").length;
+  $("#statOnAir").textContent = D.tvs.filter((tv) => statusOf(tv) === "air").length;
+}
 
 function renderGymChips() {
   const count = (gym) => D.tvs.filter((tv) => tv.gym === gym).length;
-  $("#gymChips").innerHTML = `<button class="gchip ${gymFilter === "ALL" ? "on" : ""}" data-gym="ALL">ALL</button>` + GYMS.map((gym) => `<button class="gchip gym-${gym} ${gymFilter === gym ? "on" : ""}" data-gym="${gym}">${gym} · ${count(gym)}</button>`).join("");
+
+  $("#gymChips").innerHTML =
+    `<button class="gchip ${gymFilter === "ALL" ? "on" : ""}" data-gym="ALL">ALL</button>` +
+    GYMS.map(
+      (gym) =>
+        `<button class="gchip gym-${gym} ${gymFilter === gym ? "on" : ""}" data-gym="${gym}">${gym} · ${count(gym)}</button>`
+    ).join("");
 }
 
 function cardHtml(tv) {
   const status = statusOf(tv);
   const count = (tv.playlistIds || []).length;
-  let screen = status === "off"
-    ? `<div class="scrnoise"></div><span class="tag tag-off">OFFLINE</span>`
-    : count > 0
-      ? `<div class="scrtitle">${count} video${count === 1 ? "" : "s"} in queue</div><span class="tag tag-air">ON AIR</span>`
-      : `<div class="bars">${"<span></span>".repeat(7)}</div><span class="tag tag-idle">STANDBY</span>`;
+
+  let screen;
+  if (status === "off") {
+    screen = `<div class="scrnoise"></div><span class="tag tag-off">OFFLINE</span>`;
+  } else if (count > 0) {
+    screen = `<div class="scrtitle">${count} video${count === 1 ? "" : "s"} in queue</div><span class="tag tag-air">ON AIR</span>`;
+  } else {
+    screen = `<div class="bars">${"<span></span>".repeat(7)}</div><span class="tag tag-idle">STANDBY</span>`;
+  }
 
   return `<article class="card st-${status}">
     <div class="screen">${screen}</div>
     <div class="meta">
-      <div class="l1"><span class="code">${tv.code}</span><span class="led ${status}"></span></div>
+      <div class="l1">
+        <span class="code">${tv.code}</span>
+        <span class="led ${status}"></span>
+      </div>
       <div class="l2">
         <input class="tname" value="${esc(tv.name || "")}" data-code="${tv.code}" placeholder="Screen name" />
-        <select class="tgym" data-code="${tv.code}">${GYMS.map((gym) => `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`).join("")}</select>
+        <select class="tgym" data-code="${tv.code}">
+          ${GYMS.map((gym) => `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`).join("")}
+        </select>
       </div>
       <div class="l3">
         <span class="now ${count > 0 ? "on" : ""}">${count > 0 ? "▸ " + count + " videos" : "Standby"}</span>
@@ -72,117 +186,658 @@ function cardHtml(tv) {
   </article>`;
 }
 
-function renderGrid() { const list = D.tvs.filter((tv) => gymFilter === "ALL" || tv.gym === gymFilter).sort((a, b) => a.code.localeCompare(b.code)); $("#tvGrid").innerHTML = list.length ? list.map(cardHtml).join("") : `<div class="empty">No screens yet. Click + ADD SCREEN.</div>`; }
+function renderGrid() {
+  const list = D.tvs
+    .filter((tv) => gymFilter === "ALL" || tv.gym === gymFilter)
+    .sort((a, b) => a.code.localeCompare(b.code));
+
+  $("#tvGrid").innerHTML = list.length
+    ? list.map(cardHtml).join("")
+    : `<div class="empty">No screens yet. Click + ADD SCREEN.</div>`;
+}
 
 function renderLibrary() {
-  $("#videoList").innerHTML = D.videos.length ? D.videos.map((video) => { const badge = badgeFor(video); const used = D.tvs.filter((tv) => tv.playlistIds && tv.playlistIds.includes(video.id)).length; return `<div class="vrow"><span class="vbadge ${badge.cls}">${badge.label}</span><div class="vinfo"><b>${esc(video.title)}</b><span>${esc(video.url)}</span></div><span class="vused">${used ? `on ${used}` : "unused"}</span><button class="mbtn" data-vact="edit" data-id="${video.id}" data-title="${esc(video.title)}" data-url="${esc(video.url)}">Edit</button><button class="mbtn danger" data-vact="del" data-id="${video.id}" data-title="${esc(video.title)}">Delete</button></div>`; }).join("") : `<div class="empty">No videos yet.</div>`;
+  $("#videoList").innerHTML = D.videos.length
+    ? D.videos
+        .map((video) => {
+          const badge = badgeFor(video);
+          const used = D.tvs.filter((tv) => tv.playlistIds && tv.playlistIds.includes(video.id)).length;
+
+          return `<div class="vrow">
+            <span class="vbadge ${badge.cls}">${badge.label}</span>
+            <div class="vinfo">
+              <b>${esc(video.title)}</b>
+              <span>${esc(video.url)}</span>
+            </div>
+            <span class="vused">${used ? `on ${used}` : "unused"}</span>
+            <button class="mbtn" data-vact="edit" data-id="${video.id}" data-title="${esc(video.title)}" data-url="${esc(video.url)}">Edit</button>
+            <button class="mbtn danger" data-vact="del" data-id="${video.id}" data-title="${esc(video.title)}">Delete</button>
+          </div>`;
+        })
+        .join("")
+    : `<div class="empty">No videos yet.</div>`;
 }
 
 function renderBroadcast() {
-  $("#availableVideos").innerHTML = D.videos.length ? D.videos.map(v => `<div class="avail-vid" data-id="${v.id}"><span>${esc(v.title)}</span><button type="button" class="add-btn">+</button></div>`).join("") : '<div class="empty">No videos</div>';
+  $("#availableVideos").innerHTML = D.videos.length
+    ? D.videos
+        .map(
+          (v) =>
+            `<div class="avail-vid" data-id="${v.id}"><span>${esc(v.title)}</span><button type="button" class="add-btn">+</button></div>`
+        )
+        .join("")
+    : '<div class="empty">No videos</div>';
 
-  $("#playlistQueue").innerHTML = currentPlaylistIds.length ? currentPlaylistIds.map((id, index) => { const v = D.videos.find(x => x.id === id); if (!v) return ''; return `<div class="queue-vid" data-id="${id}"><span>${esc(v.title)}</span><div class="controls"><button type="button" class="move-btn" data-act="up" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" class="move-btn" data-act="down" ${index === currentPlaylistIds.length - 1 ? 'disabled' : ''}>↓</button><button type="button" class="remove-btn">✕</button></div></div>`; }).join("") : '<div class="empty">Empty playlist</div>';
+  $("#playlistQueue").innerHTML = currentPlaylistIds.length
+    ? currentPlaylistIds
+        .map((id, index) => {
+          const v = D.videos.find((x) => x.id === id);
+          if (!v) return "";
+          return `<div class="queue-vid" data-id="${id}">
+            <span>${esc(v.title)}</span>
+            <div class="controls">
+              <button type="button" class="move-btn" data-act="up" ${index === 0 ? "disabled" : ""}>↑</button>
+              <button type="button" class="move-btn" data-act="down" ${index === currentPlaylistIds.length - 1 ? "disabled" : ""}>↓</button>
+              <button type="button" class="remove-btn">✕</button>
+            </div>
+          </div>`;
+        })
+        .join("")
+    : '<div class="empty">Empty playlist</div>';
 
-  const groups = GYMS.map((gym) => ({ gym, tvs: D.tvs.filter((tv) => tv.gym === gym) })).filter((group) => group.tvs.length);
-  $("#tvChips").innerHTML = groups.length ? groups.map(({ gym, tvs }) => `<div class="gymgroup"><div class="gymhead"><span class="gymtag gym-${gym}">${gym}</span><span class="gname">${GYM_NAMES[gym]}</span><button class="gymall" data-gym="${gym}" type="button">toggle all</button></div><div class="chiprow">${tvs.map((tv) => `<button class="tvchip ${bcCodes.has(tv.code) ? "sel" : ""} st-${statusOf(tv)}" data-code="${tv.code}" type="button"><b>${tv.code}</b><i>${esc(tv.name || "")}</i></button>`).join("")}</div></div>`).join("") : `<div class="empty">No screens yet.</div>`;
+  const groups = GYMS.map((gym) => ({
+    gym,
+    tvs: D.tvs.filter((tv) => tv.gym === gym),
+  })).filter((group) => group.tvs.length);
+
+  $("#tvChips").innerHTML = groups.length
+    ? groups
+        .map(
+          ({ gym, tvs }) => `<div class="gymgroup">
+            <div class="gymhead">
+              <span class="gymtag gym-${gym}">${gym}</span>
+              <span class="gname">${GYM_NAMES[gym]}</span>
+              <button class="gymall" data-gym="${gym}" type="button">toggle all</button>
+            </div>
+            <div class="chiprow">
+              ${tvs
+                .map(
+                  (tv) => `<button class="tvchip ${bcCodes.has(tv.code) ? "sel" : ""} st-${statusOf(tv)}" data-code="${tv.code}" type="button">
+                    <b>${tv.code}</b>
+                    <i>${esc(tv.name || "")}</i>
+                  </button>`
+                )
+                .join("")}
+            </div>
+          </div>`
+        )
+        .join("")
+    : `<div class="empty">No screens yet.</div>`;
 
   updateBcBar();
 }
 
-function updateBcBar() { const count = bcCodes.size; $("#bcInfo").textContent = currentPlaylistIds.length ? `${currentPlaylistIds.length} videos in queue → ${count} screen${count === 1 ? "" : "s"}` : `${count} screen${count === 1 ? "" : "s"} selected (queue empty)`; $("#btnSend").disabled = !(currentPlaylistIds.length && count); $("#btnStandby").disabled = !count; }
+function updateBcBar() {
+  const count = bcCodes.size;
 
-function renderAuto() { const settings = D.settings; $("#autoFallback").innerHTML = `<option value="">None</option>` + D.videos.map((video) => `<option value="${video.id}" ${settings.fallbackVideoId === video.id ? "selected" : ""}>${esc(video.title)}</option>`).join(""); $("#autoPoll").value = settings.pollSeconds ?? 60; $("#autoStandby").value = settings.standbyText ?? ""; $("#autoMute").checked = Boolean(settings.mutedAutoplay); $("#autoReload").checked = Boolean(settings.autoReloadOnError); }
+  $("#bcInfo").textContent = currentPlaylistIds.length
+    ? `${currentPlaylistIds.length} videos in queue → ${count} screen${count === 1 ? "" : "s"}`
+    : `${count} screen${count === 1 ? "" : "s"} selected (queue empty)`;
 
-function modal({ title, fields = [], submit = "Save", danger = false }) { return new Promise((resolve) => { const root = $("#modalRoot"); root.innerHTML = `<div class="mov"><div class="modal"><h3>${title}</h3><form>${fields.map((field) => { if (field.type === "select") return `<label>${field.label}<select name="${field.name}">${field.options.map((option) => `<option value="${option.v}" ${option.v === field.value ? "selected" : ""}>${esc(option.l)}</option>`).join("")}</select></label>`; return `<label>${field.label}<input name="${field.name}" type="${field.type || "text"}" value="${esc(field.value === undefined ? "" : field.value)}" placeholder="${field.ph || ""}" ${field.pattern ? `pattern="${field.pattern}"` : ""} ${field.maxlength ? `maxlength="${field.maxlength}"` : ""} required /></label>`; }).join("")}<div class="mactions"><button type="button" class="btn ghost" data-cancel>Cancel</button><button class="btn ${danger ? "danger" : "primary"}" type="submit">${submit}</button></div></form></div></div>`; const close = (value) => { root.innerHTML = ""; resolve(value); }; root.querySelector("[data-cancel]").onclick = () => close(null); root.querySelector(".mov").addEventListener("click", (event) => { if (event.target.classList.contains("mov")) close(null); }); root.querySelector("form").onsubmit = (event) => { event.preventDefault(); close(Object.fromEntries(new FormData(event.target))); }; setTimeout(() => { const first = root.querySelector("input,select"); if (first) first.focus(); }, 40); }); }
+  $("#btnSend").disabled = !(currentPlaylistIds.length && count);
+  $("#btnStandby").disabled = !count;
+}
 
+function renderAuto() {
+  const settings = D.settings;
+
+  $("#autoFallback").innerHTML =
+    `<option value="">None</option>` +
+    D.videos
+      .map(
+        (video) =>
+          `<option value="${video.id}" ${settings.fallbackVideoId === video.id ? "selected" : ""}>${esc(video.title)}</option>`
+      )
+      .join("");
+
+  $("#autoPoll").value = settings.pollSeconds ?? 60;
+  $("#autoStandby").value = settings.standbyText ?? "";
+  $("#autoMute").checked = Boolean(settings.mutedAutoplay);
+  $("#autoReload").checked = Boolean(settings.autoReloadOnError);
+}
+
+// ---------- modal ----------
+function modal({ title, fields = [], submit = "Save", danger = false }) {
+  return new Promise((resolve) => {
+    const root = $("#modalRoot");
+
+    root.innerHTML = `<div class="mov">
+      <div class="modal">
+        <h3>${title}</h3>
+        <form>
+          ${fields
+            .map((field) => {
+              if (field.type === "select") {
+                return `<label>${field.label}
+                  <select name="${field.name}">
+                    ${field.options
+                      .map(
+                        (option) =>
+                          `<option value="${option.v}" ${option.v === field.value ? "selected" : ""}>${esc(option.l)}</option>`
+                      )
+                      .join("")}
+                  </select>
+                </label>`;
+              }
+
+              return `<label>${field.label}
+                <input name="${field.name}" type="${field.type || "text"}" value="${esc(field.value === undefined ? "" : field.value)}" placeholder="${field.ph || ""}" ${field.pattern ? `pattern="${field.pattern}"` : ""} ${field.maxlength ? `maxlength="${field.maxlength}"` : ""} required />
+              </label>`;
+            })
+            .join("")}
+          <div class="mactions">
+            <button type="button" class="btn ghost" data-cancel>Cancel</button>
+            <button class="btn ${danger ? "danger" : "primary"}" type="submit">${submit}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+    const close = (value) => {
+      root.innerHTML = "";
+      resolve(value);
+    };
+
+    root.querySelector("[data-cancel]").onclick = () => close(null);
+    root.querySelector(".mov").addEventListener("click", (event) => {
+      if (event.target.classList.contains("mov")) close(null);
+    });
+    root.querySelector("form").onsubmit = (event) => {
+      event.preventDefault();
+      close(Object.fromEntries(new FormData(event.target)));
+    };
+
+    setTimeout(() => {
+      const first = root.querySelector("input,select");
+      if (first) first.focus();
+    }, 40);
+  });
+}
+
+// ---------- loops ----------
 let loopsStarted = false;
-function startLoops() { if (loopsStarted) return; loopsStarted = true; setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("en-GB"); }, 1000); setInterval(refresh, 15000); document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); }); refresh(); }
 
+function startLoops() {
+  if (loopsStarted) return;
+  loopsStarted = true;
+
+  setInterval(() => {
+    $("#clock").textContent = new Date().toLocaleTimeString("en-GB");
+  }, 1000);
+
+  setInterval(refresh, 15000);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refresh();
+  });
+
+  refresh();
+}
+
+// ---------- events ----------
 document.addEventListener("DOMContentLoaded", () => {
-  $$(".tab").forEach((tab) => { tab.addEventListener("click", () => { $$(".tab").forEach((item) => item.classList.toggle("on", item === tab)); $("#viewScreens").classList.toggle("on", tab.dataset.view === "screens"); $("#viewSettings").classList.toggle("on", tab.dataset.view === "settings"); }); });
+  // tabs
+  $$(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      $$(".tab").forEach((item) => item.classList.toggle("on", item === tab));
+      $("#viewScreens").classList.toggle("on", tab.dataset.view === "screens");
+      $("#viewSettings").classList.toggle("on", tab.dataset.view === "settings");
+    });
+  });
 
-  $("#gymChips").addEventListener("click", (event) => { const button = event.target.closest("[data-gym]"); if (!button) return; gymFilter = button.dataset.gym; renderGymChips(); renderGrid(); });
+  // gym filter
+  $("#gymChips").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-gym]");
+    if (!button) return;
+    gymFilter = button.dataset.gym;
+    renderGymChips();
+    renderGrid();
+  });
 
-  $("#btnAddTv").addEventListener("click", async () => { const result = await modal({ title: "ADD SCREEN", submit: "Create", fields: [ { name: "code", label: "Code", value: D.nextCode, pattern: "[0-9]{1,4}", maxlength: 4 }, { name: "name", label: "Name" }, { name: "gym", label: "Gym", type: "select", options: GYMS.map((gym) => ({ v: gym, l: `${gym} — ${GYM_NAMES[gym]}` })) } ] }); if (!result) return; try { const response = await jfetch("/api/admin/tvs", { method: "POST", body: result }); toast(`Screen ${response.code} created.`); refresh(); } catch (error) { toast(error.message, "err"); } });
+  // add screen
+  $("#btnAddTv").addEventListener("click", async () => {
+    const result = await modal({
+      title: "ADD SCREEN",
+      submit: "Create",
+      fields: [
+        { name: "code", label: "Code", value: D.nextCode, pattern: "[0-9]{1,4}", maxlength: 4 },
+        { name: "name", label: "Name" },
+        {
+          name: "gym",
+          label: "Gym",
+          type: "select",
+          options: GYMS.map((gym) => ({ v: gym, l: `${gym} — ${GYM_NAMES[gym]}` })),
+        },
+      ],
+    });
 
-  $("#tvGrid").addEventListener("change", async (event) => { const el = event.target; if (!el.dataset || !el.dataset.code) return; try { const body = el.classList.contains("tname") ? { name: el.value } : { gym: el.value }; await jfetch(`/api/admin/tvs/${el.dataset.code}`, { method: "PATCH", body }); toast("Saved."); refresh(); } catch (error) { toast(error.message, "err"); } });
+    if (!result) return;
 
-  $("#tvGrid").addEventListener("click", async (event) => { const button = event.target.closest("[data-act]"); if (!button) return; const { act, code } = button.dataset; try { if (act === "reload") { await jfetch(`/api/admin/tvs/${code}/reload`, { method: "POST" }); toast(`Restart sent to ${code}.`); } if (act === "standby") { await jfetch("/api/admin/broadcast", { method: "POST", body: { playlistIds: [], codes: [code] } }); toast(`${code} sent to standby.`); refresh(); } if (act === "del") { const confirmed = await modal({ title: `DELETE SCREEN ${code}?`, submit: "Delete", danger: true, fields: [{ name: "confirm", label: `Type ${code} to confirm`, pattern: code }] }); if (!confirmed) return; await jfetch(`/api/admin/tvs/${code}`, { method: "DELETE" }); toast(`Screen ${code} deleted.`); refresh(); } } catch (error) { toast(error.message, "err"); } });
+    try {
+      const response = await jfetch("/api/admin/tvs", { method: "POST", body: result });
+      toast(`Screen ${response.code} created. Enter ${response.code} on the TV.`);
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
 
-  $("#addVideoForm").addEventListener("submit", async (event) => { event.preventDefault(); try { await jfetch("/api/admin/videos", { method: "POST", body: { title: $("#avTitle").value, url: $("#avUrl").value } }); $("#avTitle").value = ""; $("#avUrl").value = ""; toast("Video link added."); refresh(); } catch (error) { toast(error.message, "err"); } });
+  // rename / change gym inline
+  $("#tvGrid").addEventListener("change", async (event) => {
+    const el = event.target;
+    if (!el.dataset || !el.dataset.code) return;
+
+    try {
+      const body = el.classList.contains("tname") ? { name: el.value } : { gym: el.value };
+      await jfetch(`/api/admin/tvs/${el.dataset.code}`, { method: "PATCH", body });
+      toast("Saved.");
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
+
+  // screen actions
+  $("#tvGrid").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-act]");
+    if (!button) return;
+
+    const { act, code } = button.dataset;
+
+    try {
+      if (act === "reload") {
+        await jfetch(`/api/admin/tvs/${code}/reload`, { method: "POST" });
+        toast(`Restart sent to ${code}.`);
+      }
+
+      if (act === "standby") {
+        await jfetch("/api/admin/broadcast", { method: "POST", body: { playlistIds: [], codes: [code] } });
+        toast(`${code} sent to standby.`);
+        refresh();
+      }
+
+      if (act === "del") {
+        const confirmed = await modal({
+          title: `DELETE SCREEN ${code}?`,
+          submit: "Delete",
+          danger: true,
+          fields: [{ name: "confirm", label: `Type ${code} to confirm`, pattern: code }],
+        });
+        if (!confirmed) return;
+
+        await jfetch(`/api/admin/tvs/${code}`, { method: "DELETE" });
+        toast(`Screen ${code} deleted.`);
+        refresh();
+      }
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
+
+  // add video link
+  $("#addVideoForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      await jfetch("/api/admin/videos", {
+        method: "POST",
+        body: { title: $("#avTitle").value, url: $("#avUrl").value },
+      });
+      $("#avTitle").value = "";
+      $("#avUrl").value = "";
+      toast("Video link added.");
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
 
   // ===== UPLOAD: small = single request, big = chunked multipart =====
   $("#uploadVideoForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const file = $("#upFile").files[0];
+    const statusEl = $("#uploadStatus");
+    const progress = $("#upProgress");
+
+    const setStatus = (text) => {
+      if (statusEl) {
+        statusEl.textContent = text;
+        statusEl.style.display = text ? "block" : "none";
+      }
+    };
+
     if (!file) { toast("Choose a file first.", "err"); return; }
     if (!file.size) { toast("File is empty.", "err"); return; }
 
-    const progress = $("#upProgress");
     progress.hidden = false;
     progress.value = 0;
+    setStatus("Preparing upload...");
 
     const title = $("#upTitle").value.trim() || file.name.replace(/\.[^.]+$/, "");
     const BIG = 50 * 1024 * 1024;
 
+    // ---- small file: one request ----
     if (file.size <= BIG) {
+      setStatus("Uploading (single request)...");
       const formData = new FormData();
       formData.append("title", title);
       formData.append("file", file);
+
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/admin/videos/upload");
-      xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) progress.value = Math.round((ev.loaded / ev.total) * 100); };
-      xhr.onload = () => { progress.hidden = true; let data = {}; try { data = JSON.parse(xhr.responseText); } catch {} if (xhr.status >= 200 && xhr.status < 300) { toast("Uploaded to R2."); form.reset(); refresh(); } else { toast(data.error || "Upload failed.", "err"); } };
-      xhr.onerror = () => { progress.hidden = true; toast("Upload failed.", "err"); };
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) progress.value = Math.round((ev.loaded / ev.total) * 100);
+      };
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status >= 200 && xhr.status < 300) {
+          progress.value = 100;
+          setStatus("Done! Video added to library.");
+          toast("Uploaded to R2.");
+          form.reset();
+          refresh();
+          setTimeout(() => { progress.hidden = true; setStatus(""); }, 2500);
+        } else {
+          progress.hidden = true;
+          setStatus("ERROR: " + (data.error || xhr.status));
+          toast(data.error || "Upload failed.", "err");
+        }
+      };
+      xhr.onerror = () => {
+        progress.hidden = true;
+        setStatus("ERROR: network failure");
+        toast("Upload failed.", "err");
+      };
       xhr.send(formData);
       return;
     }
 
+    // ---- big file: chunked multipart ----
     (async () => {
       const CHUNK = 10 * 1024 * 1024;
+
       try {
-        const start = await jfetch("/api/admin/videos/upload-start", { method: "POST", body: { name: file.name, size: file.size, type: file.type } });
+        setStatus("Starting multipart upload...");
+        const start = await jfetch("/api/admin/videos/upload-start", {
+          method: "POST",
+          body: { name: file.name, size: file.size, type: file.type },
+        });
+
+        const totalParts = Math.ceil(file.size / CHUNK);
         const parts = [];
         let partNumber = 1;
+
         for (let offset = 0; offset < file.size; offset += CHUNK) {
           const blob = file.slice(offset, offset + CHUNK);
-          const buf = await blob.arrayBuffer();
-          const res = await fetch("/api/admin/videos/upload-part", { method: "POST", headers: { "x-gc-key": start.key, "x-gc-upload": start.uploadId, "x-gc-part": String(partNumber) }, body: buf });
-          if (!res.ok) { let d = {}; try { d = await res.json(); } catch {} throw new Error(d.error || `Chunk ${partNumber} failed (${res.status})`); }
-          const d = await res.json();
-          parts.push({ partNumber: d.partNumber, etag: d.etag });
-          progress.value = Math.min(99, Math.round(((offset + blob.size) / file.size) * 100));
+          let lastErr = null;
+
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              const buf = await blob.arrayBuffer();
+              const res = await fetch("/api/admin/videos/upload-part", {
+                method: "POST",
+                headers: {
+                  "x-gc-key": start.key,
+                  "x-gc-upload": start.uploadId,
+                  "x-gc-part": String(partNumber),
+                },
+                body: buf,
+              });
+
+              if (!res.ok) {
+                let d = {};
+                try { d = await res.json(); } catch {}
+                throw new Error(d.error || `HTTP ${res.status}`);
+              }
+
+              const d = await res.json();
+              parts.push({ partNumber: d.partNumber, etag: d.etag });
+              lastErr = null;
+              break;
+            } catch (e) {
+              lastErr = e;
+              setStatus(`Chunk ${partNumber}/${totalParts} failed (attempt ${attempt}), retrying...`);
+              await new Promise((r) => setTimeout(r, 1200));
+            }
+          }
+
+          if (lastErr) throw new Error(`Chunk ${partNumber} failed: ${lastErr.message}`);
+
+          progress.value = Math.min(99, Math.round((partNumber / totalParts) * 100));
+          setStatus(`Uploading chunk ${partNumber}/${totalParts} ...`);
+          partNumber += 1;
         }
+
         parts.sort((a, b) => a.partNumber - b.partNumber);
-        await jfetch("/api/admin/videos/upload-complete", { method: "POST", body: { key: start.key, uploadId: start.uploadId, parts, title } });
+        setStatus("Finalizing file in R2 (this can take a moment)...");
+
+        await jfetch("/api/admin/videos/upload-complete", {
+          method: "POST",
+          body: { key: start.key, uploadId: start.uploadId, parts, title },
+        });
+
         progress.value = 100;
+        setStatus("Done! Video added to library.");
         toast("Uploaded to R2.");
         form.reset();
         refresh();
+        setTimeout(() => { progress.hidden = true; setStatus(""); }, 4000);
       } catch (error) {
+        console.error("Upload error:", error);
+        progress.hidden = true;
+        setStatus("ERROR: " + error.message);
         toast(error.message, "err");
-      } finally {
-        setTimeout(() => { progress.hidden = true; }, 800);
       }
     })();
   });
 
-  $("#btnImportR2").addEventListener("click", async () => { try { const { files } = await jfetch("/api/admin/r2-files"); if (!files.length) { toast("No files found in R2", "err"); return; } const result = await modal({ title: "IMPORT FROM R2", submit: "Import", fields: [ { name: "key", label: "R2 file", type: "select", options: files.map((file) => ({ v: file.key, l: `${file.key} · ${(file.size / 1048576).toFixed(1)} MB` })) }, { name: "title", label: "Title (optional)" } ] }); if (!result) return; const file = files.find((item) => item.key === result.key); if (!file) return; await jfetch("/api/admin/videos", { method: "POST", body: { title: result.title || file.key.split("/").pop(), url: file.url } }); toast("R2 video imported."); refresh(); } catch (error) { toast(error.message, "err"); } });
+  // import existing R2 file
+  $("#btnImportR2").addEventListener("click", async () => {
+    try {
+      const { files } = await jfetch("/api/admin/r2-files");
 
-  $("#videoList").addEventListener("click", async (event) => { const button = event.target.closest("[data-vact]"); if (!button) return; const { vact, id, title, url } = button.dataset; try { if (vact === "edit") { const result = await modal({ title: "EDIT VIDEO", fields: [ { name: "title", label: "Title", value: title }, { name: "url", label: "URL", value: url, type: "url" } ] }); if (!result) return; await jfetch(`/api/admin/videos/${id}`, { method: "PATCH", body: { title: result.title, url: result.url } }); toast("Video updated."); refresh(); } if (vact === "del") { const confirmed = await modal({ title: `DELETE “${title}”?`, submit: "Delete", danger: true, fields: [{ name: "confirm", label: "Type DELETE to confirm", pattern: "DELETE" }] }); if (!confirmed) return; await jfetch(`/api/admin/videos/${id}`, { method: "DELETE" }); toast("Video deleted."); refresh(); } } catch (error) { toast(error.message, "err"); } });
+      if (!files.length) {
+        toast("No files found in R2 under videos/", "err");
+        return;
+      }
 
-  $("#availableVideos").addEventListener("click", (e) => { const btn = e.target.closest(".add-btn"); if (btn) { const id = e.target.closest(".avail-vid").dataset.id; if (!currentPlaylistIds.includes(id)) { currentPlaylistIds.push(id); renderBroadcast(); } } });
+      const result = await modal({
+        title: "IMPORT FROM R2",
+        submit: "Import",
+        fields: [
+          {
+            name: "key",
+            label: "R2 file",
+            type: "select",
+            options: files.map((file) => ({
+              v: file.key,
+              l: `${file.key} · ${(file.size / 1048576).toFixed(1)} MB`,
+            })),
+          },
+          { name: "title", label: "Title (optional)" },
+        ],
+      });
 
-  $("#playlistQueue").addEventListener("click", (e) => { const vidEl = e.target.closest(".queue-vid"); if (!vidEl) return; const id = vidEl.dataset.id; const index = currentPlaylistIds.indexOf(id); if (e.target.closest(".remove-btn")) currentPlaylistIds.splice(index, 1); else if (e.target.closest(".move-btn[data-act='up']") && index > 0) [currentPlaylistIds[index-1], currentPlaylistIds[index]] = [currentPlaylistIds[index], currentPlaylistIds[index-1]]; else if (e.target.closest(".move-btn[data-act='down']") && index < currentPlaylistIds.length - 1) [currentPlaylistIds[index+1], currentPlaylistIds[index]] = [currentPlaylistIds[index], currentPlaylistIds[index+1]]; renderBroadcast(); });
+      if (!result) return;
 
-  $("#tvChips").addEventListener("click", (event) => { const toggleAll = event.target.closest(".gymall"); if (toggleAll) { const codes = D.tvs.filter((tv) => tv.gym === toggleAll.dataset.gym).map((tv) => tv.code); const every = codes.every((code) => bcCodes.has(code)); codes.forEach((code) => (every ? bcCodes.delete(code) : bcCodes.add(code))); renderBroadcast(); return; } const chip = event.target.closest("[data-code]"); if (!chip) return; const code = chip.dataset.code; if (bcCodes.has(code)) bcCodes.delete(code); else bcCodes.add(code); chip.classList.toggle("sel"); updateBcBar(); });
+      const file = files.find((item) => item.key === result.key);
+      if (!file) return;
 
-  $("#btnSend").addEventListener("click", async () => { if (!currentPlaylistIds.length || !bcCodes.size) return; try { const response = await jfetch("/api/admin/broadcast", { method: "POST", body: { playlistIds: currentPlaylistIds, codes: [...bcCodes] } }); toast(`Playlist sent to ${response.updated} screens.`); refresh(); } catch (error) { toast(error.message, "err"); } });
+      await jfetch("/api/admin/videos", {
+        method: "POST",
+        body: { title: result.title || file.key.split("/").pop(), url: file.url },
+      });
 
-  $("#btnStandby").addEventListener("click", async () => { if (!bcCodes.size) return; try { const response = await jfetch("/api/admin/broadcast", { method: "POST", body: { playlistIds: [], codes: [...bcCodes] } }); toast(`Standby: ${response.updated} screens.`); bcCodes.clear(); refresh(); } catch (error) { toast(error.message, "err"); } });
+      toast("R2 video imported.");
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
 
-  $("#autoForm").addEventListener("submit", async (event) => { event.preventDefault(); try { await jfetch("/api/admin/settings", { method: "PUT", body: { fallbackVideoId: $("#autoFallback").value || null, pollSeconds: Number($("#autoPoll").value), standbyText: $("#autoStandby").value, mutedAutoplay: $("#autoMute").checked, autoReloadOnError: $("#autoReload").checked } }); toast("Automation saved."); refresh(); } catch (error) { toast(error.message, "err"); } });
+  // edit / delete video
+  $("#videoList").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-vact]");
+    if (!button) return;
 
+    const { vact, id, title, url } = button.dataset;
+
+    try {
+      if (vact === "edit") {
+        const result = await modal({
+          title: "EDIT VIDEO",
+          fields: [
+            { name: "title", label: "Title", value: title },
+            { name: "url", label: "URL", value: url, type: "url" },
+          ],
+        });
+        if (!result) return;
+
+        await jfetch(`/api/admin/videos/${id}`, {
+          method: "PATCH",
+          body: { title: result.title, url: result.url },
+        });
+        toast("Video updated.");
+        refresh();
+      }
+
+      if (vact === "del") {
+        const confirmed = await modal({
+          title: `DELETE “${title}”?`,
+          submit: "Delete",
+          danger: true,
+          fields: [{ name: "confirm", label: "Type DELETE to confirm", pattern: "DELETE" }],
+        });
+        if (!confirmed) return;
+
+        await jfetch(`/api/admin/videos/${id}`, { method: "DELETE" });
+        toast("Video deleted.");
+        refresh();
+      }
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
+
+  // playlist builder: add from library
+  $("#availableVideos").addEventListener("click", (e) => {
+    const btn = e.target.closest(".add-btn");
+    if (!btn) return;
+    const id = e.target.closest(".avail-vid").dataset.id;
+    if (!currentPlaylistIds.includes(id)) {
+      currentPlaylistIds.push(id);
+      renderBroadcast();
+    }
+  });
+
+  // playlist builder: reorder / remove
+  $("#playlistQueue").addEventListener("click", (e) => {
+    const vidEl = e.target.closest(".queue-vid");
+    if (!vidEl) return;
+
+    const id = vidEl.dataset.id;
+    const index = currentPlaylistIds.indexOf(id);
+
+    if (e.target.closest(".remove-btn")) {
+      currentPlaylistIds.splice(index, 1);
+    } else if (e.target.closest(".move-btn[data-act='up']") && index > 0) {
+      [currentPlaylistIds[index - 1], currentPlaylistIds[index]] = [currentPlaylistIds[index], currentPlaylistIds[index - 1]];
+    } else if (e.target.closest(".move-btn[data-act='down']") && index < currentPlaylistIds.length - 1) {
+      [currentPlaylistIds[index + 1], currentPlaylistIds[index]] = [currentPlaylistIds[index], currentPlaylistIds[index + 1]];
+    }
+
+    renderBroadcast();
+  });
+
+  // screen selection chips
+  $("#tvChips").addEventListener("click", (event) => {
+    const toggleAll = event.target.closest(".gymall");
+
+    if (toggleAll) {
+      const codes = D.tvs.filter((tv) => tv.gym === toggleAll.dataset.gym).map((tv) => tv.code);
+      const every = codes.every((code) => bcCodes.has(code));
+      codes.forEach((code) => (every ? bcCodes.delete(code) : bcCodes.add(code)));
+      renderBroadcast();
+      return;
+    }
+
+    const chip = event.target.closest("[data-code]");
+    if (!chip) return;
+
+    const code = chip.dataset.code;
+    if (bcCodes.has(code)) bcCodes.delete(code);
+    else bcCodes.add(code);
+
+    chip.classList.toggle("sel");
+    updateBcBar();
+  });
+
+  // send playlist / standby
+  $("#btnSend").addEventListener("click", async () => {
+    if (!currentPlaylistIds.length || !bcCodes.size) return;
+
+    try {
+      const response = await jfetch("/api/admin/broadcast", {
+        method: "POST",
+        body: { playlistIds: currentPlaylistIds, codes: [...bcCodes] },
+      });
+      toast(`Playlist sent to ${response.updated} screens.`);
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
+
+  $("#btnStandby").addEventListener("click", async () => {
+    if (!bcCodes.size) return;
+
+    try {
+      const response = await jfetch("/api/admin/broadcast", {
+        method: "POST",
+        body: { playlistIds: [], codes: [...bcCodes] },
+      });
+      toast(`Standby: ${response.updated} screens.`);
+      bcCodes.clear();
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
+
+  // automation settings
+  $("#autoForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      await jfetch("/api/admin/settings", {
+        method: "PUT",
+        body: {
+          fallbackVideoId: $("#autoFallback").value || null,
+          pollSeconds: Number($("#autoPoll").value),
+          standbyText: $("#autoStandby").value,
+          mutedAutoplay: $("#autoMute").checked,
+          autoReloadOnError: $("#autoReload").checked,
+        },
+      });
+      toast("Automation saved.");
+      refresh();
+    } catch (error) {
+      toast(error.message, "err");
+    }
+  });
+
+  // NO LOGIN — start immediately
   startLoops();
 });
