@@ -43,6 +43,7 @@ const esc = (value = "") =>
 async function jfetch(url, { method = "GET", body } = {}) {
   const res = await fetch(url, {
     method,
+    credentials: "include",
     headers: body
       ? {
           "content-type": "application/json",
