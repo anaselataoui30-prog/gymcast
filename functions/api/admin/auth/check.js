@@ -1,16 +1,6 @@
-import {
-  isAuthed,
-  json,
-} from "../../../../lib/core.js";
+import { json } from "../../../../lib/core.js";
 
+// NO PASSWORD MODE (temporary): always answer "yes, logged in".
 export async function onRequest(context) {
-  if (context.request.method !== "GET") {
-    return json({ error: "Method not allowed." }, 405);
-  }
-
-  const authed = await isAuthed(context.request, context.env);
-
-  return json({
-    authed,
-  });
+  return json({ authed: true });
 }
