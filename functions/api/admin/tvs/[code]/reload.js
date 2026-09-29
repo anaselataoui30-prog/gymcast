@@ -19,10 +19,8 @@ export async function onRequest(context) {
     return json({ error: "Screen not found." }, 404);
   }
 
-  tv.reloadToken =
-    Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  tv.reloadToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   await writeState(context.env, state);
-
   return json({ ok: true });
 }
