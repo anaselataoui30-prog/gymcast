@@ -18,16 +18,15 @@ export async function onRequest(context) {
 
   const settings = { ...DEFAULT_SETTINGS, ...state.settings };
   const playlistIds = tv.playlistIds || [];
-  
-  // Build the playlist array, filtering out deleted videos
+
   const playlist = playlistIds
-    .map(id => state.videos.find(v => v.id === id))
+    .map((id) => state.videos.find((v) => v.id === id))
     .filter(Boolean)
-    .map(v => ({ id: v.id, title: v.title, url: v.url, source: v.source }));
+    .map((v) => ({ id: v.id, title: v.title, url: v.url, source: v.source }));
 
   return json({
     tv: { code: tv.code, name: tv.name, gym: tv.gym },
-    playlist: playlist,
+    playlist,
     settings: {
       pollSeconds: Math.max(60, Number(settings.pollSeconds) || 60),
       standbyText: settings.standbyText,
