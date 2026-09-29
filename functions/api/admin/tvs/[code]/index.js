@@ -18,31 +18,18 @@ export async function onRequest(context) {
 
   if (method === "PATCH") {
     let body = {};
+    try { body = await context.request.json(); } catch { body = {}; }
 
-    try {
-      body = await context.request.json();
-    } catch {
-      body = {};
-    }
-
-    if (body.name != null) {
-      tv.name = String(body.name).slice(0, 60);
-    }
-
-    if (body.gym != null) {
-      tv.gym = String(body.gym);
-    }
+    if (body.name != null) tv.name = String(body.name).slice(0, 60);
+    if (body.gym != null) tv.gym = String(body.gym);
 
     await writeState(context.env, state);
-
     return json({ ok: true });
   }
 
   if (method === "DELETE") {
     state.tvs = state.tvs.filter((item) => item.code !== code);
-
     await writeState(context.env, state);
-
     return json({ ok: true });
   }
 
