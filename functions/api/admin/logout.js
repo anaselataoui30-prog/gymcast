@@ -1,13 +1,21 @@
-import { clearSessionCookie, json } from "../../../lib/core.js";
+import {
+  clearSessionCookie,
+  json,
+} from "../../../lib/core.js";
 
-export async function onRequestPost() {
-  return json(
+export async function onRequest(context) {
+  if (context.request.method !== "POST") {
+    return json({ error: "Method not allowed." }, 405);
+  }
+
+  return new Response(
+    JSON.stringify({ ok: true }),
     {
-      ok: true,
-    },
-    200,
-    {
-      "set-cookie": clearSessionCookie(),
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "set-cookie": clearSessionCookie(),
+      },
     }
   );
 }
