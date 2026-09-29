@@ -797,3 +797,14 @@ progress {
 .gchip.on {
   color: #000;
 }
+
+.playlist-builder { display: flex; gap: 20px; margin-bottom: 20px; }
+.lib-col, .queue-col { flex: 1; background: #0c0f16; border: 1px solid var(--line); padding: 15px; max-height: 300px; overflow-y: auto; border-radius: 4px; }
+.lib-col h4, .queue-col h4 { margin-bottom: 10px; color: var(--amber); font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--line); padding-bottom: 5px;}
+.avail-vid, .queue-vid { display: flex; justify-content: space-between; align-items: center; padding: 8px; margin-bottom: 5px; background: #12161f; border: 1px solid #232a3a; border-radius: 4px;}
+.avail-vid span, .queue-vid span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+.avail-vid button, .queue-vid button { background: none; border: none; color: var(--txt); cursor: pointer; padding: 2px 8px; font-size: 18px; font-weight: bold;}
+.add-btn { color: var(--green); font-size: 22px; }
+.remove-btn { color: var(--red); }
+.move-btn { color: var(--amber); font-size: 16px; }
+.controls { display: flex; gap: 5px; flex-shrink: 0; }
