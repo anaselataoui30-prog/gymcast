@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST Remote</title>
+<style>
+  body{margin:0;background:#0b0d12;color:#e9edf5;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;box-sizing:border-box;}
+  .remote{background:#12161f;border-top:5px solid #ffb02e;border-radius:10px;padding:24px;width:100%;max-width:420px;box-shadow:0 10px 40px rgba(0,0,0,.6);}
+  h1{font-size:20px;color:#ffb02e;letter-spacing:2px;margin:0 0 4px;text-align:center;}
+  .sub{text-align:center;color:#8791a5;font-size:12px;margin-bottom:16px;}
+  select{width:100%;background:#0c0f16;color:#e9edf5;border:1px solid #232a3a;padding:10px;border-radius:6px;margin-bottom:14px;font-size:15px;}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .grid button{background:#171c28;border:1px solid #232a3a;color:#e9edf5;padding:14px 4px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:.12s;}
+  .grid button:hover{border-color:#ffb02e;}
+  .grid button:active,.grid button.flash{background:#ffb02e;color:#000;border-color:#ffb02e;}
+  .wide{grid-column:span 2;}
+  #status{text-align:center;color:#8791a5;font-family:monospace;font-size:12px;margin-top:12px;min-height:16px;}
+</style>
+</head>
+<body>
+<div class="remote">
+  <h1>GYMCAST REMOTE</h1>
+  <div class="sub">Live control for one screen</div>
+  <select id="screenSelect"></select>
+  <div class="grid">
+    <button class="wide" data-cmd="play">▶ PLAY</button>
+    <button class="wide" data-cmd="pause">⏸ PAUSE</button>
+    <button data-cmd="seek" data-arg="-60">-1m</button>
+    <button data-cmd="seek" data-arg="-30">-30s</button>
+    <button data-cmd="seek" data-arg="30">+30s</button>
+    <button data-cmd="seek" data-arg="60">+1m</button>
+    <button data-cmd="voldown">VOL-</button>
+    <button data-cmd="volup">VOL+</button>
+    <button data-cmd="mute">MUTE</button>
+    <button data-cmd="unmute">UNMUTE</button>
+    <button data-cmd="prev">⏮ PREV</button>
+    <button data-cmd="next">⏭ NEXT</button>
+    <button data-cmd="replay">↺ REPLAY</button>
+    <button data-cmd="blackout">⬛ BLACKOUT</button>
+  </div>
+  <div id="status"></div>
+</div>
+<script>
+  const sel = document.getElementById("screenSelect");
+  const statusEl = document.getElementById("status");
+
+  async function loadScreens(){
+    try{
+      const res = await fetch("/api/admin/dashboard");
+      const data = await res.json();
+      const tvs = data.tvs || [];
+      const last = localStorage.getItem("gymcast_remote_code");
+      sel.innerHTML = tvs.map(t => `<option value="${t.code}" ${t.code === last ? "selected" : ""}>${t.code} — ${t.name}</option>`).join("") || `<option value="">No screens yet</option>`;
+    }catch(e){ statusEl.textContent = "Failed to load screens: " + e.message; }
+  }
+  loadScreens();
+  setInterval(loadScreens, 30000);
+
+  sel.addEventListener("change", () => { localStorage.setItem("gymcast_remote_code", sel.value); });
+
+  document.querySelectorAll(".grid button").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const code = sel.value;
+      if(!code){ statusEl.textContent = "Pick a screen first"; return; }
+      btn.classList.add("flash");
+      setTimeout(() => btn.classList.remove("flash"), 250);
+      statusEl.textContent = "Sending " + btn.dataset.cmd + " ...";
+      try{
+        const res = await fetch("/api/admin/remote", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({ code, cmd: btn.dataset.cmd, arg: Number(btn.dataset.arg || 0) })
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error(data.error || res.status);
+        statusEl.textContent = "✓ " + btn.dataset.cmd + " sent to " + code + " (arrives in ~3s)";
+      }catch(e){ statusEl.textContent = "ERROR: " + e.message; }
+    });
+  });
+</script>
+</body>
+</html>
