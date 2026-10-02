@@ -5,118 +5,71 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GYMCAST Remote</title>
 <style>
-  :root {
-    --bg: #0b0d12; --card1: #161b26; --card2: #10141c;
-    --line: #262d3d; --line2: #2a3245; --btn: #1b2130;
-    --txt: #e9edf5; --mut: #8791a5; --amber: #ffb02e; --red: #ff4d3d; --green: #3ddc84;
-  }
+  :root { --bg:#0b0d12; --card1:#161b26; --card2:#10141c; --line:#262d3d; --line2:#2a3245; --btn:#1b2130; --txt:#e9edf5; --mut:#8791a5; --amber:#ffb02e; --red:#ff4d3d; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body {
-    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(900px 500px at 50% -10%, #1a2030 0%, transparent 60%), var(--bg);
-    color: var(--txt); font-family: system-ui, -apple-system, sans-serif; padding: 18px;
-  }
-  .remote {
-    width: 100%; max-width: 430px; border-radius: 22px; padding: 22px;
-    background: linear-gradient(180deg, var(--card1), var(--card2));
-    border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0,0,0,.65), inset 0 1px 0 #ffffff12;
-    user-select: none; touch-action: manipulation;
-  }
-  .head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-  .bars7 { display: inline-flex; width: 34px; height: 9px; border-radius: 2px; overflow: hidden; }
-  .bars7 span { flex: 1; }
-  .bars7 span:nth-child(1){background:#b4b4b4}.bars7 span:nth-child(2){background:#b4b400}
-  .bars7 span:nth-child(3){background:#00b4b4}.bars7 span:nth-child(4){background:#00b400}
-  .bars7 span:nth-child(5){background:#b400b4}.bars7 span:nth-child(6){background:#b40000}
-  .bars7 span:nth-child(7){background:#0000b4}
-  .head b { letter-spacing: 2px; font-size: 15px; }
-  .live { margin-left: auto; display: flex; align-items: center; gap: 6px; font-family: monospace; font-size: 10px; letter-spacing: 2px; color: var(--amber); }
-  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); animation: blink 1.6s infinite; }
-  @keyframes blink { 50% { opacity: .25; } }
-  .sub { color: var(--mut); font-size: 11px; margin: 0 0 14px 44px; }
-
-  select {
-    width: 100%; background: var(--btn); color: var(--txt); border: 1px solid var(--line2);
-    padding: 12px; border-radius: 12px; font-size: 15px; font-weight: 600; outline: none; margin-bottom: 6px;
-  }
-  select:focus { border-color: var(--amber); }
-  #chip { text-align: center; font-family: monospace; font-size: 11px; color: var(--mut); margin-bottom: 16px; min-height: 14px; }
-
-  .cluster { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 18px; }
-  .cluster button {
-    width: 58px; height: 58px; border-radius: 50%; background: var(--btn); border: 1px solid var(--line2);
-    color: var(--txt); font-size: 18px; cursor: pointer; transition: .12s;
-  }
-  #playBtn {
-    width: 82px; height: 82px; font-size: 26px; border: none; color: #191100;
-    background: radial-gradient(circle at 35% 30%, #ffd47a, var(--amber) 60%, #d98f10);
-    box-shadow: 0 8px 24px #ffb02e40, inset 0 2px 4px #ffffff66;
-  }
-  .cluster button:hover { border-color: var(--amber); }
-  #playBtn:hover { filter: brightness(1.08); }
-  button:active, button.flash { transform: scale(.93); }
-
-  .seekstrip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; margin-bottom: 16px; }
-  .seekstrip button {
-    padding: 12px 0; border-radius: 12px; background: var(--btn); border: 1px solid var(--line2);
-    color: var(--txt); font-family: monospace; font-size: 12px; font-weight: 700; cursor: pointer; transition: .12s;
-  }
-  .seekstrip button:hover { border-color: var(--amber); color: var(--amber); }
-
-  .volrow { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-  .volrow button {
-    width: 52px; height: 44px; border-radius: 12px; background: var(--btn); border: 1px solid var(--line2);
-    color: var(--txt); font-weight: 800; font-size: 16px; cursor: pointer; transition: .12s;
-  }
-  .volrow button:hover { border-color: var(--amber); }
-  #volbar { flex: 1; display: flex; gap: 4px; height: 26px; align-items: center; }
-  #volbar i { flex: 1; height: 12px; border-radius: 3px; background: var(--line2); transition: .15s; }
-  #volbar i.on { background: var(--amber); box-shadow: 0 0 8px #ffb02e55; }
-  #volbar i.on.low { background: var(--red); box-shadow: 0 0 8px #ff4d3d55; }
-  #volpct { width: 44px; text-align: right; font-family: monospace; font-size: 12px; color: var(--mut); }
-
-  .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
-  .toggles button {
-    position: relative; padding: 13px 0; border-radius: 12px; background: var(--btn); border: 1px solid var(--line2);
-    color: var(--mut); font-size: 12px; font-weight: 800; letter-spacing: 1px; cursor: pointer; transition: .15s;
-  }
-  .toggles button:hover { border-color: var(--amber); }
-  .toggles button .led {
-    position: absolute; top: 7px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: #3a4356;
-  }
-  .toggles button.on { color: var(--txt); border-color: var(--amber); background: #ffb02e14; }
-  .toggles button.on .led { background: var(--red); box-shadow: 0 0 8px var(--red); }
-  #muteBtn.on .led { background: var(--red); box-shadow: 0 0 8px var(--red); }
-
-  #status {
-    text-align: center; font-family: monospace; font-size: 12px; color: var(--amber);
-    min-height: 16px; margin-bottom: 8px;
-  }
-  #log {
-    font-family: monospace; font-size: 10.5px; color: #5d6779; min-height: 52px;
-    border-top: 1px solid var(--line); padding-top: 8px; line-height: 1.5;
-  }
-  .hints { margin-top: 10px; text-align: center; color: #414b5e; font-size: 10px; letter-spacing: .5px; }
-  kbd { background: #1b2130; border: 1px solid var(--line2); border-radius: 4px; padding: 1px 5px; font-family: monospace; font-size: 9.5px; color: var(--mut); }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background: radial-gradient(900px 500px at 50% -10%, #1a2030 0%, transparent 60%), var(--bg); color:var(--txt); font-family: system-ui,-apple-system,sans-serif; padding:18px; }
+  .remote { width:100%; max-width:460px; border-radius:22px; padding:20px; background:linear-gradient(180deg,var(--card1),var(--card2)); border:1px solid var(--line); box-shadow:0 24px 60px rgba(0,0,0,.65), inset 0 1px 0 #ffffff12; user-select:none; }
+  .head { display:flex; align-items:center; gap:10px; }
+  .bars7 { display:inline-flex; width:34px; height:9px; border-radius:2px; overflow:hidden; }
+  .bars7 span{flex:1}
+  .bars7 span:nth-child(1){background:#b4b4b4}.bars7 span:nth-child(2){background:#b4b400}.bars7 span:nth-child(3){background:#00b4b4}.bars7 span:nth-child(4){background:#00b400}.bars7 span:nth-child(5){background:#b400b4}.bars7 span:nth-child(6){background:#b40000}.bars7 span:nth-child(7){background:#0000b4}
+  .head b { letter-spacing:2px; font-size:15px; }
+  .live { margin-left:auto; display:flex; align-items:center; gap:6px; font-family:monospace; font-size:10px; letter-spacing:2px; color:var(--amber); }
+  .live i { width:8px; height:8px; border-radius:50%; background:var(--amber); animation:blink 1.6s infinite; }
+  @keyframes blink { 50%{opacity:.25} }
+  .lbl { font-family:monospace; font-size:10px; letter-spacing:2px; color:var(--mut); margin:14px 0 6px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chips button { background:var(--btn); border:1px solid var(--line2); color:var(--mut); border-radius:999px; padding:8px 12px; font-size:12px; font-weight:700; cursor:pointer; transition:.12s; }
+  .chips button small { color:var(--amber); font-family:monospace; }
+  .chips button.on { background:#ffb02e18; border-color:var(--amber); color:var(--txt); }
+  .chips button:active { transform:scale(.95); }
+  #selinfo { text-align:center; font-family:monospace; font-size:11px; color:var(--amber); margin:12px 0; min-height:14px; }
+  .cluster { display:flex; align-items:center; justify-content:center; gap:18px; margin-bottom:16px; }
+  .cluster button { width:56px; height:56px; border-radius:50%; background:var(--btn); border:1px solid var(--line2); color:var(--txt); font-size:17px; cursor:pointer; transition:.12s; }
+  #playBtn { width:80px; height:80px; font-size:25px; border:none; color:#191100; background:radial-gradient(circle at 35% 30%, #ffd47a, var(--amber) 60%, #d98f10); box-shadow:0 8px 24px #ffb02e40, inset 0 2px 4px #ffffff66; }
+  .cluster button:hover { border-color:var(--amber); }
+  button:active, button.flash { transform:scale(.93); }
+  .seekstrip { display:grid; grid-template-columns:repeat(6,1fr); gap:7px; margin-bottom:14px; }
+  .seekstrip button { padding:12px 0; border-radius:12px; background:var(--btn); border:1px solid var(--line2); color:var(--txt); font-family:monospace; font-size:12px; font-weight:700; cursor:pointer; transition:.12s; }
+  .seekstrip button:hover { border-color:var(--amber); color:var(--amber); }
+  .volrow { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .volrow button { width:50px; height:42px; border-radius:12px; background:var(--btn); border:1px solid var(--line2); color:var(--txt); font-weight:800; font-size:16px; cursor:pointer; }
+  #volbar { flex:1; display:flex; gap:4px; height:24px; align-items:center; }
+  #volbar i { flex:1; height:11px; border-radius:3px; background:var(--line2); transition:.15s; }
+  #volbar i.on { background:var(--amber); box-shadow:0 0 8px #ffb02e55; }
+  #volbar i.on.low { background:var(--red); box-shadow:0 0 8px #ff4d3d55; }
+  #volpct { width:42px; text-align:right; font-family:monospace; font-size:12px; color:var(--mut); }
+  .toggles { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px; }
+  .toggles button { position:relative; padding:13px 0; border-radius:12px; background:var(--btn); border:1px solid var(--line2); color:var(--mut); font-size:11px; font-weight:800; letter-spacing:1px; cursor:pointer; transition:.15s; }
+  .toggles button .led { position:absolute; top:7px; right:8px; width:7px; height:7px; border-radius:50%; background:#3a4356; }
+  .toggles button.on { color:var(--txt); border-color:var(--amber); background:#ffb02e14; }
+  .toggles button.on .led { background:var(--red); box-shadow:0 0 8px var(--red); }
+  #status { text-align:center; font-family:monospace; font-size:12px; color:var(--amber); min-height:16px; margin-bottom:8px; }
+  #log { font-family:monospace; font-size:10.5px; color:#5d6779; min-height:48px; border-top:1px solid var(--line); padding-top:8px; line-height:1.5; }
+  .hints { margin-top:8px; text-align:center; color:#414b5e; font-size:10px; }
+  kbd { background:#1b2130; border:1px solid var(--line2); border-radius:4px; padding:1px 5px; font-family:monospace; font-size:9.5px; color:var(--mut); }
 </style>
 </head>
 <body>
-
 <div class="remote" id="remoteBody">
   <div class="head">
     <span class="bars7"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span>
     <b>GYMCAST REMOTE</b>
     <span class="live"><i id="sendDot"></i>LIVE</span>
   </div>
-  <p class="sub">Broadcast console · swipe ⇄ to seek · space = play/pause</p>
 
-  <select id="screenSelect"></select>
-  <div id="chip"></div>
+  <div class="lbl">PLAYLIST GROUPS — one tap controls every screen inside</div>
+  <div id="groups" class="chips"></div>
+
+  <div class="lbl">INDIVIDUAL SCREENS</div>
+  <div id="screens" class="chips"></div>
+
+  <div id="selinfo"></div>
 
   <div class="cluster">
-    <button id="prevBtn" title="Previous video">⏮</button>
-    <button id="playBtn" title="Play / Pause">⏸</button>
-    <button id="nextBtn" title="Next video">⏭</button>
+    <button id="prevBtn">⏮</button>
+    <button id="playBtn">⏸</button>
+    <button id="nextBtn">⏭</button>
   </div>
 
   <div class="seekstrip">
@@ -143,178 +96,167 @@
 
   <div id="status"></div>
   <div id="log"></div>
-  <div class="hints">
-    <kbd>space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> ∓30s · <kbd>↑</kbd><kbd>↓</kbd> volume · <kbd>M</kbd> mute · <kbd>B</kbd> blackout · <kbd>N</kbd>/<kbd>P</kbd> next/prev · <kbd>R</kbd> replay
-  </div>
+  <div class="hints"><kbd>space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> ∓30s · <kbd>↑</kbd><kbd>↓</kbd> vol · <kbd>M</kbd> mute · <kbd>B</kbd> blackout · <kbd>N</kbd>/<kbd>P</kbd> next/prev · swipe ⇄ = ∓30s</div>
 </div>
 
 <script>
-  const sel = document.getElementById("screenSelect");
-  const chip = document.getElementById("chip");
-  const statusEl = document.getElementById("status");
-  const logEl = document.getElementById("log");
-  const sendDot = document.getElementById("sendDot");
-  const playBtn = document.getElementById("playBtn");
-  const muteBtn = document.getElementById("muteBtn");
-  const blackBtn = document.getElementById("blackBtn");
-  const volbar = document.getElementById("volbar");
-  const volpct = document.getElementById("volpct");
-  const remoteBody = document.getElementById("remoteBody");
+  const $ = (s) => document.querySelector(s);
+  const groupsEl = $("#groups"), screensEl = $("#screens"), selinfo = $("#selinfo");
+  const statusEl = $("#status"), logEl = $("#log"), sendDot = $("#sendDot");
+  const playBtn = $("#playBtn"), muteBtn = $("#muteBtn"), blackBtn = $("#blackBtn");
+  const volbar = $("#volbar"), volpct = $("#volpct"), remoteBody = $("#remoteBody");
 
-  // volume bar segments
   for (let i = 0; i < 10; i++) volbar.appendChild(document.createElement("i"));
 
-  // ---------- per-screen state mirror ----------
-  const defaultMirror = () => ({ playing: true, muted: false, blackout: false, vol: 100 });
-  const mirrorKey = (code) => "gymcast_remote_mirror_" + code;
-  let mirror = defaultMirror();
+  let tvs = [], videos = [], groups = [];
+  const selected = new Set();
 
-  function loadMirror(code) {
-    try { return Object.assign(defaultMirror(), JSON.parse(localStorage.getItem(mirrorKey(code)) || "{}")); }
-    catch { return defaultMirror(); }
-  }
-  function saveMirror() {
-    if (sel.value) localStorage.setItem(mirrorKey(sel.value), JSON.stringify(mirror));
-  }
+  // session mirror (play/mute/blackout/volume state as last commanded)
+  let mirror = Object.assign({ playing:true, muted:false, blackout:false, vol:100 },
+    (function(){ try { return JSON.parse(localStorage.getItem("gymcast_remote_mirror") || "{}"); } catch(e){ return {}; } })());
+  const saveMirror = () => localStorage.setItem("gymcast_remote_mirror", JSON.stringify(mirror));
 
   function renderMirror() {
     playBtn.textContent = mirror.playing ? "⏸" : "▶";
     muteBtn.classList.toggle("on", mirror.muted);
     muteBtn.firstChild.textContent = mirror.muted ? "UNMUTE" : "MUTE";
     blackBtn.classList.toggle("on", mirror.blackout);
-    const segs = volbar.children;
     const lit = Math.round(mirror.vol / 10);
-    for (let i = 0; i < segs.length; i++) {
-      segs[i].className = i < lit ? (mirror.vol <= 30 ? "on low" : "on") : "";
-    }
+    [...volbar.children].forEach((seg, i) => { seg.className = i < lit ? (mirror.vol <= 30 ? "on low" : "on") : ""; });
     volpct.textContent = mirror.vol + "%";
   }
 
-  // ---------- screens ----------
-  async function loadScreens() {
+  async function load() {
     try {
       const res = await fetch("/api/admin/dashboard");
       const data = await res.json();
-      const tvs = data.tvs || [];
-      const last = localStorage.getItem("gymcast_remote_code");
-      sel.innerHTML = tvs.map(t => `<option value="${t.code}" ${t.code === last ? "selected" : ""}>${t.code} — ${t.name}</option>`).join("") || `<option value="">No screens yet</option>`;
-      onScreenChange(false);
-    } catch (e) { setStatus("Failed to load screens: " + e.message); }
+      tvs = data.tvs || []; videos = data.videos || [];
+      // prune selection of deleted screens
+      const alive = new Set(tvs.map(t => t.code));
+      [...selected].forEach(c => { if (!alive.has(c)) selected.delete(c); });
+      buildGroups();
+      renderChips();
+    } catch (e) { setStatus("Load failed: " + e.message); }
   }
 
-  function onScreenChange(load) {
-    const code = sel.value;
-    localStorage.setItem("gymcast_remote_code", code || "");
-    const opt = sel.selectedOptions[0];
-    chip.textContent = code ? ("CONTROLLING → " + code + (opt && opt.textContent.includes("—") ? " · " + opt.textContent.split("—").pop().trim() : "")) : "";
-    mirror = loadMirror(code);
-    renderMirror();
+  function buildGroups() {
+    const map = new Map();
+    for (const tv of tvs) {
+      const key = (tv.playlistIds || []).join(",");
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(tv.code);
+    }
+    groups = [...map.entries()].map(([key, codes]) => {
+      let label = "STANDBY";
+      if (key) {
+        const titles = key.split(",").map(id => (videos.find(v => v.id === id) || {}).title).filter(Boolean);
+        if (titles.length) label = titles[0] + (titles.length > 1 ? ` +${titles.length - 1}` : "");
+      }
+      return { key, label, codes };
+    });
   }
 
-  sel.addEventListener("change", () => onScreenChange(true));
-  loadScreens();
-  setInterval(loadScreens, 30000);
+  function renderChips() {
+    groupsEl.innerHTML =
+      `<button data-all="1" class="${selected.size === tvs.length && tvs.length ? "on" : ""}">ALL <small>${tvs.length}</small></button>` +
+      groups.map((g, i) =>
+        `<button data-g="${i}" class="${g.codes.every(c => selected.has(c)) ? "on" : ""}">🎬 ${g.label} <small>${g.codes.length}</small></button>`
+      ).join("");
+
+    screensEl.innerHTML = tvs.map(tv =>
+      `<button data-c="${tv.code}" class="${selected.has(tv.code) ? "on" : ""}">${tv.code} · ${tv.name}</button>`
+    ).join("") || `<button disabled>no screens</button>`;
+
+    selinfo.textContent = selected.size
+      ? `CONTROLLING ${selected.size} SCREEN${selected.size === 1 ? "" : "S"}: ${[...selected].sort().join(", ")}`
+      : "Tap a group (or screens) to control";
+  }
+
+  function toggleCodes(codes) {
+    const allIn = codes.every(c => selected.has(c));
+    codes.forEach(c => allIn ? selected.delete(c) : selected.add(c));
+    renderChips();
+  }
+
+  groupsEl.addEventListener("click", (e) => {
+    const all = e.target.closest("[data-all]");
+    if (all) { 
+      if (selected.size === tvs.length) selected.clear();
+      else tvs.forEach(t => selected.add(t.code));
+      renderChips(); return;
+    }
+    const g = e.target.closest("[data-g]");
+    if (g) toggleCodes(groups[Number(g.dataset.g)].codes);
+  });
+
+  screensEl.addEventListener("click", (e) => {
+    const c = e.target.closest("[data-c]");
+    if (c) toggleCodes([c.dataset.c]);
+  });
 
   // ---------- sending ----------
   const logEntries = [];
-  function log(label) {
-    const t = new Date().toLocaleTimeString("en-GB", { hour12: false });
-    logEntries.unshift(t + "  " + label);
-    if (logEntries.length > 4) logEntries.pop();
-    logEl.innerHTML = logEntries.map(x => `<div>${x}</div>`).join("");
-  }
-
-  function pulse() {
-    sendDot.style.background = "var(--green)";
-    setTimeout(() => { sendDot.style.background = "var(--amber)"; }, 400);
-  }
-
-  function setStatus(t) { statusEl.textContent = t; }
+  const log = (t) => { logEntries.unshift(new Date().toLocaleTimeString("en-GB", { hour12: false }) + "  " + t); if (logEntries.length > 4) logEntries.pop(); logEl.innerHTML = logEntries.map(x => `<div>${x}</div>`).join(""); };
+  const pulse = () => { sendDot.style.background = "var(--red)"; setTimeout(() => { sendDot.style.background = "var(--amber)"; }, 400); };
+  const setStatus = (t) => { statusEl.textContent = t; };
 
   async function send(cmd, arg = 0, label) {
-    const code = sel.value;
-    if (!code) { setStatus("Pick a screen first"); return; }
+    const codes = [...selected];
+    if (!codes.length) { setStatus("Pick a group or screens first"); return; }
     pulse();
-    setStatus("Sending " + (label || cmd) + " → " + code + " ...");
+    setStatus(`Sending ${label || cmd} → ${codes.length} screen(s)...`);
     try {
       const res = await fetch("/api/admin/remote", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code, cmd, arg })
+        body: JSON.stringify({ codes, cmd, arg })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.status);
-      log((label || cmd) + " → " + code);
-      setStatus("✓ " + (label || cmd) + " delivered (~3s)");
+      log(`${label || cmd} → ${data.sent} screens`);
+      setStatus(`✓ ${label || cmd} → ${data.sent} screen(s)`);
     } catch (e) { setStatus("ERROR: " + e.message); }
   }
 
-  function seekBy(sec) {
-    const label = (sec > 0 ? "+" : "") + (Math.abs(sec) >= 60 ? (sec / 60) + "m" : sec + "s");
-    send("seek", sec, "SEEK " + label);
-  }
+  const seekBy = (s) => send("seek", s, "SEEK " + (s > 0 ? "+" : "") + (Math.abs(s) >= 60 ? s / 60 + "m" : s + "s"));
 
-  // ---------- controls ----------
-  playBtn.addEventListener("click", () => {
-    mirror.playing = !mirror.playing; saveMirror(); renderMirror();
-    send(mirror.playing ? "play" : "pause", 0, mirror.playing ? "PLAY" : "PAUSE");
-  });
+  playBtn.addEventListener("click", () => { mirror.playing = !mirror.playing; saveMirror(); renderMirror(); send(mirror.playing ? "play" : "pause", 0, mirror.playing ? "PLAY" : "PAUSE"); });
+  $("#nextBtn").addEventListener("click", () => send("next", 0, "NEXT"));
+  $("#prevBtn").addEventListener("click", () => send("prev", 0, "PREV"));
+  $("#replayBtn").addEventListener("click", () => send("replay", 0, "REPLAY"));
+  document.querySelectorAll("[data-seek]").forEach(b => b.addEventListener("click", () => seekBy(Number(b.dataset.seek))));
+  $("#volUp").addEventListener("click", () => { mirror.vol = Math.min(100, mirror.vol + 10); saveMirror(); renderMirror(); send("volup", 0, "VOL " + mirror.vol + "%"); });
+  $("#volDown").addEventListener("click", () => { mirror.vol = Math.max(0, mirror.vol - 10); saveMirror(); renderMirror(); send("voldown", 0, "VOL " + mirror.vol + "%"); });
+  muteBtn.addEventListener("click", () => { mirror.muted = !mirror.muted; saveMirror(); renderMirror(); send(mirror.muted ? "mute" : "unmute", 0, mirror.muted ? "MUTE" : "UNMUTE"); });
+  blackBtn.addEventListener("click", () => { mirror.blackout = !mirror.blackout; saveMirror(); renderMirror(); send("blackout", 0, mirror.blackout ? "BLACKOUT ON" : "BLACKOUT OFF"); });
 
-  document.getElementById("nextBtn").addEventListener("click", () => send("next", 0, "NEXT VIDEO"));
-  document.getElementById("prevBtn").addEventListener("click", () => send("prev", 0, "PREV VIDEO"));
-  document.getElementById("replayBtn").addEventListener("click", () => send("replay", 0, "REPLAY"));
-
-  document.querySelectorAll("[data-seek]").forEach(b => {
-    b.addEventListener("click", () => seekBy(Number(b.dataset.seek)));
-  });
-
-  document.getElementById("volUp").addEventListener("click", () => {
-    mirror.vol = Math.min(100, mirror.vol + 10); saveMirror(); renderMirror();
-    send("volup", 0, "VOLUME " + mirror.vol + "%");
-  });
-  document.getElementById("volDown").addEventListener("click", () => {
-    mirror.vol = Math.max(0, mirror.vol - 10); saveMirror(); renderMirror();
-    send("voldown", 0, "VOLUME " + mirror.vol + "%");
-  });
-
-  muteBtn.addEventListener("click", () => {
-    mirror.muted = !mirror.muted; saveMirror(); renderMirror();
-    send(mirror.muted ? "mute" : "unmute", 0, mirror.muted ? "MUTE" : "UNMUTE");
-  });
-
-  blackBtn.addEventListener("click", () => {
-    mirror.blackout = !mirror.blackout; saveMirror(); renderMirror();
-    send("blackout", 0, mirror.blackout ? "BLACKOUT ON" : "BLACKOUT OFF");
-  });
-
-  // ---------- keyboard shortcuts ----------
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
     switch (e.key) {
       case " ": e.preventDefault(); playBtn.click(); break;
       case "ArrowLeft": e.preventDefault(); seekBy(-30); break;
       case "ArrowRight": e.preventDefault(); seekBy(30); break;
-      case "ArrowUp": e.preventDefault(); document.getElementById("volUp").click(); break;
-      case "ArrowDown": e.preventDefault(); document.getElementById("volDown").click(); break;
+      case "ArrowUp": e.preventDefault(); $("#volUp").click(); break;
+      case "ArrowDown": e.preventDefault(); $("#volDown").click(); break;
       case "m": case "M": muteBtn.click(); break;
       case "b": case "B": blackBtn.click(); break;
-      case "n": case "N": document.getElementById("nextBtn").click(); break;
-      case "p": case "P": document.getElementById("prevBtn").click(); break;
-      case "r": case "R": document.getElementById("replayBtn").click(); break;
+      case "n": case "N": $("#nextBtn").click(); break;
+      case "p": case "P": $("#prevBtn").click(); break;
+      case "r": case "R": $("#replayBtn").click(); break;
     }
   });
 
-  // ---------- swipe to seek (mobile) ----------
   let touchX = null;
   remoteBody.addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
   remoteBody.addEventListener("touchend", (e) => {
     if (touchX === null) return;
-    const dx = e.changedTouches[0].clientX - touchX;
-    touchX = null;
+    const dx = e.changedTouches[0].clientX - touchX; touchX = null;
     if (Math.abs(dx) > 60) seekBy(dx > 0 ? 30 : -30);
   }, { passive: true });
 
   renderMirror();
+  load();
+  setInterval(load, 30000);
 </script>
 </body>
 </html>
