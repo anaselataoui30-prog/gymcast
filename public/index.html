@@ -58,6 +58,13 @@
     const connectBtn = document.getElementById("connectBtn");
     const soundOverlay = document.getElementById("sound-overlay");
 
+    // Polling economy: 10 min idle, 5 s turbo for 3 min after any remote command
+    const POLL_IDLE_DEFAULT = 600 * 1000;
+    const POLL_TURBO = 5 * 1000;
+    const TURBO_WINDOW = 180 * 1000;
+    let turboUntil = 0;
+    let idleDelay = POLL_IDLE_DEFAULT;
+
     let currentPlaylist = [];
     let currentIndex = 0;
     let ytPlayer = null;
@@ -101,6 +108,11 @@
           const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
           const data = await res.json();
+
+          // respect the interval chosen in Admin → Automation (60–600 s)
+          const secs = Number(data.settings && data.settings.pollSeconds);
+          if (secs >= 60 && secs <= 600) idleDelay = secs * 1000;
+
           const incomingPlaylist = data.playlist || [];
           const incomingIds = incomingPlaylist.map(v => v.id).join(',');
           const currentIds = currentPlaylist.map(v => v.id).join(',');
@@ -113,14 +125,18 @@
             showStandby();
           }
         } catch(e) { console.error("Poll error", e); }
+
+        // remote commands ride along — no separate interval, no extra cost when idle
+        await checkCommands();
+
+        const delay = Date.now() < turboUntil ? POLL_TURBO : idleDelay;
+        setTimeout(poll, delay);
       }
 
       poll();
-      setInterval(poll, 15000);
     }
 
-    // ---------- REMOTE CONTROL ----------
-    async function pollCmd() {
+    async function checkCommands() {
       if (!activeCode) return;
       try {
         const res = await fetch(`/api/tv/cmd?code=${activeCode}`, { cache: "no-store" });
@@ -130,11 +146,11 @@
         if (c && c.seq > lastSeq) {
           lastSeq = c.seq;
           localStorage.setItem(LS_SEQ + activeCode, String(lastSeq));
+          turboUntil = Date.now() + TURBO_WINDOW; // remote session opened: go fast for 3 min
           executeCmd(c);
         }
       } catch(e) {}
     }
-    setInterval(pollCmd, 3000);
 
     function applyVol() {
       if (htmlVid) { htmlVid.volume = vol / 100; htmlVid.muted = (vol === 0); }
