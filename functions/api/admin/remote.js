@@ -11,15 +11,19 @@ export async function onRequest(context) {
   let body = {};
   try { body = await context.request.json(); } catch { body = {}; }
 
-  const code = normalizeCode(body.code);
+  // one code OR many codes — same endpoint
+  let codes = [];
+  if (Array.isArray(body.codes)) codes = body.codes.map(normalizeCode);
+  else if (body.code) codes = [normalizeCode(body.code)];
+  codes = [...new Set(codes.filter((c) => c && c !== "0000"))].slice(0, 500);
+
   const cmd = String(body.cmd || "");
   const arg = Number(body.arg) || 0;
 
-  if (!code || code === "0000") return json({ error: "Missing code." }, 400);
+  if (!codes.length) return json({ error: "No screens selected." }, 400);
   if (!ALLOWED.includes(cmd)) return json({ error: "Unknown command." }, 400);
 
   let cmds = {};
-
   if (env.BUCKET) {
     const obj = await env.BUCKET.get(CMD_KEY);
     if (obj) { try { cmds = await obj.json(); } catch { cmds = {}; } }
@@ -27,8 +31,11 @@ export async function onRequest(context) {
     cmds = (globalThis.__gymcast && globalThis.__gymcast.cmds) || {};
   }
 
-  const prev = cmds[code];
-  cmds[code] = { seq: (prev && prev.seq ? prev.seq : 0) + 1, cmd, arg, ts: Date.now() };
+  const ts = Date.now();
+  for (const code of codes) {
+    const prev = cmds[code];
+    cmds[code] = { seq: (prev && prev.seq ? prev.seq : 0) + 1, cmd, arg, ts };
+  }
 
   if (env.BUCKET) {
     await env.BUCKET.put(CMD_KEY, JSON.stringify(cmds), { httpMetadata: { contentType: "application/json" } });
@@ -37,5 +44,5 @@ export async function onRequest(context) {
     globalThis.__gymcast.cmds = cmds;
   }
 
-  return json({ ok: true, seq: cmds[code].seq });
+  return json({ ok: true, sent: codes.length });
 }
