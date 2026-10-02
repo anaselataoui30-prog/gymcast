@@ -1,284 +1,320 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GYMCAST TV</title>
-  <script src="https://www.youtube.com/iframe_api"></script>
-  <style>
-    body { margin: 0; background: #0b0d12; color: #e9edf5; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; overflow: hidden; }
-    .box { background: #12161f; padding: 40px; border-radius: 8px; text-align: center; border-top: 5px solid #ffb02e; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 500px; width: 90%; }
-    h1 { margin: 0 0 10px 0; color: #ffb02e; letter-spacing: 2px; }
-    p { color: #8791a5; margin-bottom: 25px; }
-    .digits { display: flex; gap: 15px; margin-bottom: 25px; justify-content: center; }
-    .digit { width: 70px; height: 90px; font-size: 48px; font-weight: bold; text-align: center; background: #0c0f16; color: #ffb02e; border: 2px solid #232a3a; border-radius: 6px; }
-    .digit:focus { border-color: #ffb02e; outline: none; box-shadow: 0 0 10px rgba(255,176,46,0.2); }
-    button { background: #ffb02e; color: #000; border: none; padding: 16px 40px; font-size: 18px; font-weight: 800; cursor: pointer; border-radius: 4px; letter-spacing: 1px; transition: 0.2s; width: 100%; }
-    button:hover { background: #ffc55e; transform: translateY(-2px); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    #error { color: #ff4d3d; margin-top: 15px; min-height: 24px; font-weight: bold; }
-    #player { position: fixed; top:0; left:0; width:100%; height:100%; background:black; display:none; z-index: 10; align-items: center; justify-content: center; }
-    #player iframe, #player video { width: 100%; height: 100%; border: none; object-fit: contain; }
-    #standby-text { color: #333; font-size: 80px; font-weight: 900; letter-spacing: 10px; }
-    .reset-btn { position: fixed; bottom: 15px; right: 15px; color: #444; font-size: 12px; cursor: pointer; background: none; border: 1px solid #333; padding: 5px 10px; border-radius: 4px; z-index: 20; }
-    .reset-btn:hover { color: #ff4d3d; border-color: #ff4d3d; }
-    #sound-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 30; display: none; align-items: center; justify-content: center; cursor: pointer; flex-direction: column; gap: 20px; }
-    #sound-overlay span { color: #ffb02e; font-size: 32px; font-weight: 800; letter-spacing: 2px; text-align: center; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
-    #blackout { position: fixed; inset: 0; background: #000; z-index: 40; display: none; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST Remote</title>
+<style>
+  :root {
+    --bg: #0b0d12; --card1: #161b26; --card2: #10141c;
+    --line: #262d3d; --line2: #2a3245; --btn: #1b2130;
+    --txt: #e9edf5; --mut: #8791a5; --amber: #ffb02e; --red: #ff4d3d; --green: #3ddc84;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(900px 500px at 50% -10%, #1a2030 0%, transparent 60%), var(--bg);
+    color: var(--txt); font-family: system-ui, -apple-system, sans-serif; padding: 18px;
+  }
+  .remote {
+    width: 100%; max-width: 430px; border-radius: 22px; padding: 22px;
+    background: linear-gradient(180deg, var(--card1), var(--card2));
+    border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0,0,0,.65), inset 0 1px 0 #ffffff12;
+    user-select: none; touch-action: manipulation;
+  }
+  .head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .bars7 { display: inline-flex; width: 34px; height: 9px; border-radius: 2px; overflow: hidden; }
+  .bars7 span { flex: 1; }
+  .bars7 span:nth-child(1){background:#b4b4b4}.bars7 span:nth-child(2){background:#b4b400}
+  .bars7 span:nth-child(3){background:#00b4b4}.bars7 span:nth-child(4){background:#00b400}
+  .bars7 span:nth-child(5){background:#b400b4}.bars7 span:nth-child(6){background:#b40000}
+  .bars7 span:nth-child(7){background:#0000b4}
+  .head b { letter-spacing: 2px; font-size: 15px; }
+  .live { margin-left: auto; display: flex; align-items: center; gap: 6px; font-family: monospace; font-size: 10px; letter-spacing: 2px; color: var(--amber); }
+  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .sub { color: var(--mut); font-size: 11px; margin: 0 0 14px 44px; }
+
+  select {
+    width: 100%; background: var(--btn); color: var(--txt); border: 1px solid var(--line2);
+    padding: 12px; border-radius: 12px; font-size: 15px; font-weight: 600; outline: none; margin-bottom: 6px;
+  }
+  select:focus { border-color: var(--amber); }
+  #chip { text-align: center; font-family: monospace; font-size: 11px; color: var(--mut); margin-bottom: 16px; min-height: 14px; }
+
+  .cluster { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 18px; }
+  .cluster button {
+    width: 58px; height: 58px; border-radius: 50%; background: var(--btn); border: 1px solid var(--line2);
+    color: var(--txt); font-size: 18px; cursor: pointer; transition: .12s;
+  }
+  #playBtn {
+    width: 82px; height: 82px; font-size: 26px; border: none; color: #191100;
+    background: radial-gradient(circle at 35% 30%, #ffd47a, var(--amber) 60%, #d98f10);
+    box-shadow: 0 8px 24px #ffb02e40, inset 0 2px 4px #ffffff66;
+  }
+  .cluster button:hover { border-color: var(--amber); }
+  #playBtn:hover { filter: brightness(1.08); }
+  button:active, button.flash { transform: scale(.93); }
+
+  .seekstrip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; margin-bottom: 16px; }
+  .seekstrip button {
+    padding: 12px 0; border-radius: 12px; background: var(--btn); border: 1px solid var(--line2);
+    color: var(--txt); font-family: monospace; font-size: 12px; font-weight: 700; cursor: pointer; transition: .12s;
+  }
+  .seekstrip button:hover { border-color: var(--amber); color: var(--amber); }
+
+  .volrow { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .volrow button {
+    width: 52px; height: 44px; border-radius: 12px; background: var(--btn); border: 1px solid var(--line2);
+    color: var(--txt); font-weight: 800; font-size: 16px; cursor: pointer; transition: .12s;
+  }
+  .volrow button:hover { border-color: var(--amber); }
+  #volbar { flex: 1; display: flex; gap: 4px; height: 26px; align-items: center; }
+  #volbar i { flex: 1; height: 12px; border-radius: 3px; background: var(--line2); transition: .15s; }
+  #volbar i.on { background: var(--amber); box-shadow: 0 0 8px #ffb02e55; }
+  #volbar i.on.low { background: var(--red); box-shadow: 0 0 8px #ff4d3d55; }
+  #volpct { width: 44px; text-align: right; font-family: monospace; font-size: 12px; color: var(--mut); }
+
+  .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .toggles button {
+    position: relative; padding: 13px 0; border-radius: 12px; background: var(--btn); border: 1px solid var(--line2);
+    color: var(--mut); font-size: 12px; font-weight: 800; letter-spacing: 1px; cursor: pointer; transition: .15s;
+  }
+  .toggles button:hover { border-color: var(--amber); }
+  .toggles button .led {
+    position: absolute; top: 7px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: #3a4356;
+  }
+  .toggles button.on { color: var(--txt); border-color: var(--amber); background: #ffb02e14; }
+  .toggles button.on .led { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  #muteBtn.on .led { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  #status {
+    text-align: center; font-family: monospace; font-size: 12px; color: var(--amber);
+    min-height: 16px; margin-bottom: 8px;
+  }
+  #log {
+    font-family: monospace; font-size: 10.5px; color: #5d6779; min-height: 52px;
+    border-top: 1px solid var(--line); padding-top: 8px; line-height: 1.5;
+  }
+  .hints { margin-top: 10px; text-align: center; color: #414b5e; font-size: 10px; letter-spacing: .5px; }
+  kbd { background: #1b2130; border: 1px solid var(--line2); border-radius: 4px; padding: 1px 5px; font-family: monospace; font-size: 9.5px; color: var(--mut); }
+</style>
 </head>
 <body>
 
-  <div id="activation" class="box">
-    <h1>GYMCAST TV</h1>
-    <p>Enter the 4-digit code for this screen:</p>
-    <div class="digits">
-      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
-      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
-      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
-      <input class="digit" maxlength="1" type="tel" inputmode="numeric">
-    </div>
-    <button id="connectBtn">CONNECT SCREEN</button>
-    <div id="error"></div>
+<div class="remote" id="remoteBody">
+  <div class="head">
+    <span class="bars7"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span>
+    <b>GYMCAST REMOTE</b>
+    <span class="live"><i id="sendDot"></i>LIVE</span>
+  </div>
+  <p class="sub">Broadcast console · swipe ⇄ to seek · space = play/pause</p>
+
+  <select id="screenSelect"></select>
+  <div id="chip"></div>
+
+  <div class="cluster">
+    <button id="prevBtn" title="Previous video">⏮</button>
+    <button id="playBtn" title="Play / Pause">⏸</button>
+    <button id="nextBtn" title="Next video">⏭</button>
   </div>
 
-  <div id="player"></div>
-  <div id="blackout"></div>
-  <div id="sound-overlay"><span>🔊 TAP TO ENABLE SOUND</span></div>
-  <button class="reset-btn" onclick="if(confirm('Forget this TV and start over?')){localStorage.clear(); location.reload();}">Reset TV</button>
+  <div class="seekstrip">
+    <button data-seek="-300">-5m</button>
+    <button data-seek="-60">-1m</button>
+    <button data-seek="-30">-30s</button>
+    <button data-seek="30">+30s</button>
+    <button data-seek="60">+1m</button>
+    <button data-seek="300">+5m</button>
+  </div>
 
-  <script>
-    const LS_CODE = "gymcast_tv_code";
-    const LS_SEQ = "gymcast_seq_";
-    const savedCode = localStorage.getItem(LS_CODE);
-    const activation = document.getElementById("activation");
-    const player = document.getElementById("player");
-    const errorEl = document.getElementById("error");
-    const digits = document.querySelectorAll(".digit");
-    const connectBtn = document.getElementById("connectBtn");
-    const soundOverlay = document.getElementById("sound-overlay");
+  <div class="volrow">
+    <button id="volDown">−</button>
+    <div id="volbar"></div>
+    <span id="volpct">100%</span>
+    <button id="volUp">＋</button>
+  </div>
 
-    // Polling economy: 10 min idle, 5 s turbo for 3 min after any remote command
-    const POLL_IDLE_DEFAULT = 600 * 1000;
-    const POLL_TURBO = 5 * 1000;
-    const TURBO_WINDOW = 180 * 1000;
-    let turboUntil = 0;
-    let idleDelay = POLL_IDLE_DEFAULT;
+  <div class="toggles">
+    <button id="muteBtn">MUTE<span class="led"></span></button>
+    <button id="blackBtn">BLACKOUT<span class="led"></span></button>
+    <button id="replayBtn">↺ REPLAY<span class="led" style="opacity:0"></span></button>
+  </div>
 
-    let currentPlaylist = [];
-    let currentIndex = 0;
-    let ytPlayer = null;
-    let htmlVid = null;
-    let soundUnlocked = false;
-    let activeCode = null;
-    let lastSeq = 0;
-    let vol = 100;
-    let blackedOut = false;
+  <div id="status"></div>
+  <div id="log"></div>
+  <div class="hints">
+    <kbd>space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> ∓30s · <kbd>↑</kbd><kbd>↓</kbd> volume · <kbd>M</kbd> mute · <kbd>B</kbd> blackout · <kbd>N</kbd>/<kbd>P</kbd> next/prev · <kbd>R</kbd> replay
+  </div>
+</div>
 
-    digits.forEach((d, i) => {
-      d.addEventListener("input", () => { d.value = d.value.replace(/\D/g, ''); if (d.value && i < 3) digits[i+1].focus(); });
-      d.addEventListener("keydown", (e) => { if (e.key === "Backspace" && !d.value && i > 0) digits[i-1].focus(); });
-    });
+<script>
+  const sel = document.getElementById("screenSelect");
+  const chip = document.getElementById("chip");
+  const statusEl = document.getElementById("status");
+  const logEl = document.getElementById("log");
+  const sendDot = document.getElementById("sendDot");
+  const playBtn = document.getElementById("playBtn");
+  const muteBtn = document.getElementById("muteBtn");
+  const blackBtn = document.getElementById("blackBtn");
+  const volbar = document.getElementById("volbar");
+  const volpct = document.getElementById("volpct");
+  const remoteBody = document.getElementById("remoteBody");
 
-    if (savedCode) { activation.style.display = "none"; startPolling(savedCode); }
+  // volume bar segments
+  for (let i = 0; i < 10; i++) volbar.appendChild(document.createElement("i"));
 
-    connectBtn.addEventListener("click", async () => {
-      const code = Array.from(digits).map(d => d.value).join("");
-      if (code.length < 4) { errorEl.innerText = "Please enter all 4 digits"; return; }
-      errorEl.innerText = "Connecting..."; connectBtn.disabled = true;
-      try {
-        const res = await fetch("/api/tv/activate", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({code}) });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Code not found");
-        localStorage.setItem(LS_CODE, code);
-        activation.style.display = "none";
-        startPolling(code);
-      } catch(e) { errorEl.innerText = e.message; connectBtn.disabled = false; }
-    });
+  // ---------- per-screen state mirror ----------
+  const defaultMirror = () => ({ playing: true, muted: false, blackout: false, vol: 100 });
+  const mirrorKey = (code) => "gymcast_remote_mirror_" + code;
+  let mirror = defaultMirror();
 
-    window.onYouTubeIframeAPIReady = function() { console.log("YT API Ready"); };
+  function loadMirror(code) {
+    try { return Object.assign(defaultMirror(), JSON.parse(localStorage.getItem(mirrorKey(code)) || "{}")); }
+    catch { return defaultMirror(); }
+  }
+  function saveMirror() {
+    if (sel.value) localStorage.setItem(mirrorKey(sel.value), JSON.stringify(mirror));
+  }
 
-    async function startPolling(code) {
-      activeCode = code;
-      lastSeq = Number(localStorage.getItem(LS_SEQ + code) || 0);
-      try { document.documentElement.requestFullscreen?.(); } catch(e){}
-
-      async function poll() {
-        try {
-          const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
-          if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
-          const data = await res.json();
-
-          // respect the interval chosen in Admin → Automation (60–600 s)
-          const secs = Number(data.settings && data.settings.pollSeconds);
-          if (secs >= 60 && secs <= 600) idleDelay = secs * 1000;
-
-          const incomingPlaylist = data.playlist || [];
-          const incomingIds = incomingPlaylist.map(v => v.id).join(',');
-          const currentIds = currentPlaylist.map(v => v.id).join(',');
-
-          if (incomingIds !== currentIds) {
-            currentPlaylist = incomingPlaylist;
-            currentIndex = 0;
-            playCurrent();
-          } else if (currentPlaylist.length === 0 && player.style.display !== "flex") {
-            showStandby();
-          }
-        } catch(e) { console.error("Poll error", e); }
-
-        // remote commands ride along — no separate interval, no extra cost when idle
-        await checkCommands();
-
-        const delay = Date.now() < turboUntil ? POLL_TURBO : idleDelay;
-        setTimeout(poll, delay);
-      }
-
-      poll();
+  function renderMirror() {
+    playBtn.textContent = mirror.playing ? "⏸" : "▶";
+    muteBtn.classList.toggle("on", mirror.muted);
+    muteBtn.firstChild.textContent = mirror.muted ? "UNMUTE" : "MUTE";
+    blackBtn.classList.toggle("on", mirror.blackout);
+    const segs = volbar.children;
+    const lit = Math.round(mirror.vol / 10);
+    for (let i = 0; i < segs.length; i++) {
+      segs[i].className = i < lit ? (mirror.vol <= 30 ? "on low" : "on") : "";
     }
+    volpct.textContent = mirror.vol + "%";
+  }
 
-    async function checkCommands() {
-      if (!activeCode) return;
-      try {
-        const res = await fetch(`/api/tv/cmd?code=${activeCode}`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        const c = data.cmd;
-        if (c && c.seq > lastSeq) {
-          lastSeq = c.seq;
-          localStorage.setItem(LS_SEQ + activeCode, String(lastSeq));
-          turboUntil = Date.now() + TURBO_WINDOW; // remote session opened: go fast for 3 min
-          executeCmd(c);
-        }
-      } catch(e) {}
+  // ---------- screens ----------
+  async function loadScreens() {
+    try {
+      const res = await fetch("/api/admin/dashboard");
+      const data = await res.json();
+      const tvs = data.tvs || [];
+      const last = localStorage.getItem("gymcast_remote_code");
+      sel.innerHTML = tvs.map(t => `<option value="${t.code}" ${t.code === last ? "selected" : ""}>${t.code} — ${t.name}</option>`).join("") || `<option value="">No screens yet</option>`;
+      onScreenChange(false);
+    } catch (e) { setStatus("Failed to load screens: " + e.message); }
+  }
+
+  function onScreenChange(load) {
+    const code = sel.value;
+    localStorage.setItem("gymcast_remote_code", code || "");
+    const opt = sel.selectedOptions[0];
+    chip.textContent = code ? ("CONTROLLING → " + code + (opt && opt.textContent.includes("—") ? " · " + opt.textContent.split("—").pop().trim() : "")) : "";
+    mirror = loadMirror(code);
+    renderMirror();
+  }
+
+  sel.addEventListener("change", () => onScreenChange(true));
+  loadScreens();
+  setInterval(loadScreens, 30000);
+
+  // ---------- sending ----------
+  const logEntries = [];
+  function log(label) {
+    const t = new Date().toLocaleTimeString("en-GB", { hour12: false });
+    logEntries.unshift(t + "  " + label);
+    if (logEntries.length > 4) logEntries.pop();
+    logEl.innerHTML = logEntries.map(x => `<div>${x}</div>`).join("");
+  }
+
+  function pulse() {
+    sendDot.style.background = "var(--green)";
+    setTimeout(() => { sendDot.style.background = "var(--amber)"; }, 400);
+  }
+
+  function setStatus(t) { statusEl.textContent = t; }
+
+  async function send(cmd, arg = 0, label) {
+    const code = sel.value;
+    if (!code) { setStatus("Pick a screen first"); return; }
+    pulse();
+    setStatus("Sending " + (label || cmd) + " → " + code + " ...");
+    try {
+      const res = await fetch("/api/admin/remote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, cmd, arg })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.status);
+      log((label || cmd) + " → " + code);
+      setStatus("✓ " + (label || cmd) + " delivered (~3s)");
+    } catch (e) { setStatus("ERROR: " + e.message); }
+  }
+
+  function seekBy(sec) {
+    const label = (sec > 0 ? "+" : "") + (Math.abs(sec) >= 60 ? (sec / 60) + "m" : sec + "s");
+    send("seek", sec, "SEEK " + label);
+  }
+
+  // ---------- controls ----------
+  playBtn.addEventListener("click", () => {
+    mirror.playing = !mirror.playing; saveMirror(); renderMirror();
+    send(mirror.playing ? "play" : "pause", 0, mirror.playing ? "PLAY" : "PAUSE");
+  });
+
+  document.getElementById("nextBtn").addEventListener("click", () => send("next", 0, "NEXT VIDEO"));
+  document.getElementById("prevBtn").addEventListener("click", () => send("prev", 0, "PREV VIDEO"));
+  document.getElementById("replayBtn").addEventListener("click", () => send("replay", 0, "REPLAY"));
+
+  document.querySelectorAll("[data-seek]").forEach(b => {
+    b.addEventListener("click", () => seekBy(Number(b.dataset.seek)));
+  });
+
+  document.getElementById("volUp").addEventListener("click", () => {
+    mirror.vol = Math.min(100, mirror.vol + 10); saveMirror(); renderMirror();
+    send("volup", 0, "VOLUME " + mirror.vol + "%");
+  });
+  document.getElementById("volDown").addEventListener("click", () => {
+    mirror.vol = Math.max(0, mirror.vol - 10); saveMirror(); renderMirror();
+    send("voldown", 0, "VOLUME " + mirror.vol + "%");
+  });
+
+  muteBtn.addEventListener("click", () => {
+    mirror.muted = !mirror.muted; saveMirror(); renderMirror();
+    send(mirror.muted ? "mute" : "unmute", 0, mirror.muted ? "MUTE" : "UNMUTE");
+  });
+
+  blackBtn.addEventListener("click", () => {
+    mirror.blackout = !mirror.blackout; saveMirror(); renderMirror();
+    send("blackout", 0, mirror.blackout ? "BLACKOUT ON" : "BLACKOUT OFF");
+  });
+
+  // ---------- keyboard shortcuts ----------
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+    switch (e.key) {
+      case " ": e.preventDefault(); playBtn.click(); break;
+      case "ArrowLeft": e.preventDefault(); seekBy(-30); break;
+      case "ArrowRight": e.preventDefault(); seekBy(30); break;
+      case "ArrowUp": e.preventDefault(); document.getElementById("volUp").click(); break;
+      case "ArrowDown": e.preventDefault(); document.getElementById("volDown").click(); break;
+      case "m": case "M": muteBtn.click(); break;
+      case "b": case "B": blackBtn.click(); break;
+      case "n": case "N": document.getElementById("nextBtn").click(); break;
+      case "p": case "P": document.getElementById("prevBtn").click(); break;
+      case "r": case "R": document.getElementById("replayBtn").click(); break;
     }
+  });
 
-    function applyVol() {
-      if (htmlVid) { htmlVid.volume = vol / 100; htmlVid.muted = (vol === 0); }
-      if (ytPlayer && ytPlayer.setVolume) { ytPlayer.setVolume(vol); }
-    }
+  // ---------- swipe to seek (mobile) ----------
+  let touchX = null;
+  remoteBody.addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+  remoteBody.addEventListener("touchend", (e) => {
+    if (touchX === null) return;
+    const dx = e.changedTouches[0].clientX - touchX;
+    touchX = null;
+    if (Math.abs(dx) > 60) seekBy(dx > 0 ? 30 : -30);
+  }, { passive: true });
 
-    function executeCmd(c) {
-      const cmd = c.cmd;
-      const arg = Number(c.arg) || 0;
-      const bo = document.getElementById("blackout");
-
-      switch (cmd) {
-        case "play":
-          if (htmlVid) htmlVid.play().catch(() => {});
-          if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
-          break;
-        case "pause":
-          if (htmlVid) htmlVid.pause();
-          if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-          break;
-        case "seek":
-          if (htmlVid) htmlVid.currentTime = Math.max(0, htmlVid.currentTime + arg);
-          if (ytPlayer && ytPlayer.getCurrentTime && ytPlayer.seekTo) ytPlayer.seekTo(Math.max(0, ytPlayer.getCurrentTime() + arg), true);
-          break;
-        case "mute":
-          if (htmlVid) htmlVid.muted = true;
-          if (ytPlayer && ytPlayer.mute) ytPlayer.mute();
-          break;
-        case "unmute":
-          soundUnlocked = true;
-          soundOverlay.style.display = "none";
-          if (htmlVid) htmlVid.muted = false;
-          if (ytPlayer && ytPlayer.unMute) ytPlayer.unMute();
-          break;
-        case "volup":
-          vol = Math.min(100, vol + 10); applyVol();
-          break;
-        case "voldown":
-          vol = Math.max(0, vol - 10); applyVol();
-          break;
-        case "next":
-          playNext();
-          break;
-        case "prev":
-          playPrev();
-          break;
-        case "replay":
-          if (htmlVid) { htmlVid.currentTime = 0; htmlVid.play().catch(() => {}); }
-          if (ytPlayer && ytPlayer.seekTo) { ytPlayer.seekTo(0, true); ytPlayer.playVideo(); }
-          break;
-        case "blackout":
-          blackedOut = !blackedOut;
-          bo.style.display = blackedOut ? "block" : "none";
-          break;
-      }
-    }
-
-    function getYTId(url) {
-      try {
-        const u = new URL(url);
-        if (u.hostname.includes("youtu.be")) return u.pathname.slice(1);
-        if (u.pathname.includes("/shorts/") || u.pathname.includes("/embed/") || u.pathname.includes("/live/")) return u.pathname.split("/").pop();
-        return u.searchParams.get("v");
-      } catch(e) { return ""; }
-    }
-
-    function playCurrent() {
-      if (currentPlaylist.length === 0) { showStandby(); return; }
-
-      player.style.display = "block";
-      const video = currentPlaylist[currentIndex];
-      const isYT = /youtube\.com|youtu\.be/i.test(video.url);
-
-      if (ytPlayer) { try { ytPlayer.destroy(); } catch(e){} ytPlayer = null; }
-      if (htmlVid) { htmlVid.removeEventListener('ended', playNext); htmlVid.removeEventListener('error', playNext); htmlVid = null; }
-
-      if (isYT) {
-        const id = getYTId(video.url);
-        player.innerHTML = '<div id="yt-player-container" style="width:100%;height:100%;"></div>';
-        ytPlayer = new YT.Player('yt-player-container', {
-          videoId: id,
-          playerVars: { autoplay: 1, mute: 0, loop: 0, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
-          events: {
-            onReady: (event) => {
-              event.target.playVideo();
-              if (soundUnlocked) { event.target.unMute(); event.target.setVolume(vol); }
-            },
-            onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
-            onError: () => playNext()
-          }
-        });
-        if (!soundUnlocked) soundOverlay.style.display = "flex";
-      } else {
-        player.innerHTML = `<video id="html-vid" src="${video.url}" autoplay playsinline></video>`;
-        htmlVid = document.getElementById("html-vid");
-        htmlVid.volume = vol / 100;
-        htmlVid.addEventListener('ended', playNext);
-        htmlVid.addEventListener('error', playNext);
-        const p = htmlVid.play();
-        if (p !== undefined) p.catch(() => { if (!soundUnlocked) soundOverlay.style.display = "flex"; });
-      }
-    }
-
-    function playNext() {
-      if (currentPlaylist.length === 0) return;
-      currentIndex = (currentIndex + 1) % currentPlaylist.length;
-      playCurrent();
-    }
-
-    function playPrev() {
-      if (currentPlaylist.length === 0) return;
-      currentIndex = (currentIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
-      playCurrent();
-    }
-
-    function showStandby() {
-      player.style.display = "flex";
-      player.innerHTML = `<div id="standby-text">STANDBY</div>`;
-      soundOverlay.style.display = "none";
-    }
-
-    soundOverlay.addEventListener("click", () => {
-      soundUnlocked = true;
-      soundOverlay.style.display = "none";
-      if (htmlVid) { htmlVid.muted = false; htmlVid.play().catch(() => {}); }
-      if (ytPlayer && ytPlayer.unMute) { ytPlayer.unMute(); ytPlayer.setVolume(vol); ytPlayer.playVideo(); }
-      try { document.documentElement.requestFullscreen?.(); } catch(e){}
-    });
-  </script>
+  renderMirror();
+</script>
 </body>
 </html>
