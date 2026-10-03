@@ -35,6 +35,7 @@ export async function onRequest(context) {
       autoReloadOnError: Boolean(settings.autoReloadOnError),
     },
     reloadToken: tv.reloadToken || null,
+    resetToken: tv.resetToken || null,
     storage: env.BUCKET ? "r2" : "memory",
   });
 }
