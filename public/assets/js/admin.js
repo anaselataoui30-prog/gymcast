@@ -56,7 +56,11 @@ async function jfetch(url, { method = "GET", body } = {}) {
   let data = {};
   try { data = await res.json(); } catch {}
 
-  if (!res.ok) {
+    if (!res.ok) {
+    if (res.status === 401 && window.gcAuth && gcAuth.getToken()) {
+      gcAuth.clear();
+      location.reload();
+    }
     const error = new Error(data.error || `Request failed (${res.status})`);
     error.status = res.status;
     throw error;
