@@ -842,6 +842,50 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // NO LOGIN — start immediately
-  startLoops();
+  // ---------- login gate ----------
+  const loginOv = document.getElementById("loginOv");
+  const loginErr = document.getElementById("loginErr");
+
+  function showLogin(msg) {
+    if (msg) { loginErr.textContent = msg; loginErr.hidden = false; }
+    loginOv.hidden = false;
+    setTimeout(() => document.getElementById("loginPass").focus(), 50);
+  }
+
+  function hideLogin() {
+    loginOv.hidden = true;
+    loginErr.hidden = true;
+  }
+
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = document.getElementById("loginPass").value;
+    loginErr.hidden = true;
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      gcAuth.setToken(data.token);
+      document.getElementById("loginPass").value = "";
+      hideLogin();
+      startLoops();
+    } catch (err) {
+      showLogin(err.message);
+    }
+  });
+
+  document.getElementById("btnLogout").addEventListener("click", () => {
+    gcAuth.clear();
+    location.reload();
+  });
+
+  if (gcAuth.getToken()) {
+    startLoops();
+  } else {
+    showLogin();
+  }
 });
