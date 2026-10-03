@@ -1,8 +1,8 @@
 "use strict";
 
 // ============================================================
-// GYMCAST CONTROL ROOM — full admin logic (no login, playlists,
-// chunked R2 uploads, screens manager, automation)
+// GYMCAST CONTROL ROOM
+// login (token) + screens + pause/play + playlists + uploads
 // ============================================================
 
 const GYMS = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"];
@@ -56,7 +56,7 @@ async function jfetch(url, { method = "GET", body } = {}) {
   let data = {};
   try { data = await res.json(); } catch {}
 
-    if (!res.ok) {
+  if (!res.ok) {
     if (res.status === 401 && window.gcAuth && gcAuth.getToken()) {
       gcAuth.clear();
       location.reload();
@@ -159,7 +159,7 @@ function cardHtml(tv) {
   if (status === "off") {
     screen = `<div class="scrnoise"></div><span class="tag tag-off">OFFLINE</span>`;
   } else if (count > 0) {
-    screen = `<div class="scrtitle">${count} video${count === 1 ? "" : "s"} in queue</div><span class="tag tag-air">ON AIR</span>`;
+    screen = `<div class="scrtitle">${tv.paused ? "⏸ PAUSED · " : ""}${count} video${count === 1 ? "" : "s"}</div><span class="tag tag-air">ON AIR</span>`;
   } else {
     screen = `<div class="bars">${"<span></span>".repeat(7)}</div><span class="tag tag-idle">STANDBY</span>`;
   }
@@ -178,10 +178,11 @@ function cardHtml(tv) {
         </select>
       </div>
       <div class="l3">
-        <span class="now ${count > 0 ? "on" : ""}">${count > 0 ? "▸ " + count + " videos" : "Standby"}</span>
+        <span class="now ${count > 0 ? "on" : ""}">${count > 0 ? (tv.paused ? "⏸ " : "▸ ") + count + " videos" : "Standby"}</span>
         <span class="seen">${D.presence[tv.code] ? timeAgo(D.presence[tv.code]) : "never"}</span>
       </div>
       <div class="l4">
+        <button class="mbtn" data-act="pause" data-code="${tv.code}">${tv.paused ? "▶ Play" : "⏸ Pause"}</button>
         <button class="mbtn" data-act="reload" data-code="${tv.code}">Restart</button>
         <button class="mbtn" data-act="standby" data-code="${tv.code}">Stop</button>
         <button class="mbtn danger" data-act="del" data-code="${tv.code}">Delete</button>
@@ -304,7 +305,7 @@ function renderAuto() {
       )
       .join("");
 
-  $("#autoPoll").value = settings.pollSeconds ?? 60;
+  $("#autoPoll").value = settings.pollSeconds ?? 600;
   $("#autoStandby").value = settings.standbyText ?? "";
   $("#autoMute").checked = Boolean(settings.mutedAutoplay);
   $("#autoReload").checked = Boolean(settings.autoReloadOnError);
@@ -451,7 +452,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // screen actions
+  // screen actions: pause/play, restart, stop, delete
   $("#tvGrid").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-act]");
     if (!button) return;
@@ -459,6 +460,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const { act, code } = button.dataset;
 
     try {
+      if (act === "pause") {
+        const tv = D.tvs.find((t) => t.code === code);
+        const next = !(tv && tv.paused);
+        await jfetch(`/api/admin/tvs/${code}`, { method: "PATCH", body: { paused: next } });
+        toast(next ? `⏸ ${code} pauses at next check-in` : `▶ ${code} resumes at next check-in`);
+        refresh();
+      }
+
       if (act === "reload") {
         await jfetch(`/api/admin/tvs/${code}/reload`, { method: "POST" });
         toast(`Restart sent to ${code}.`);
@@ -883,7 +892,8 @@ document.addEventListener("DOMContentLoaded", () => {
     location.reload();
   });
 
-  if (gcAuth.getToken()) {
+  // boot: token present -> straight in; otherwise login box
+  if (window.gcAuth && gcAuth.getToken()) {
     startLoops();
   } else {
     showLogin();
