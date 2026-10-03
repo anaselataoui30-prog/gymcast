@@ -1,7 +1,4 @@
-import {
-  createSessionCookie,
-  json,
-} from "../../../lib/core.js";
+import { json, createToken } from "../../../lib/core.js";
 
 export async function onRequest(context) {
   if (context.request.method !== "POST") {
@@ -11,40 +8,17 @@ export async function onRequest(context) {
   const { env, request } = context;
 
   if (!env.ADMIN_PASSWORD) {
-    return json(
-      {
-        error:
-          "ADMIN_PASSWORD is not set. Add it in Cloudflare Pages environment variables.",
-      },
-      500
-    );
+    return json({ error: "ADMIN_PASSWORD is not set in Cloudflare Pages environment variables." }, 500);
   }
 
   let body = {};
+  try { body = await request.json(); } catch { body = {}; }
 
-  try {
-    body = await request.json();
-  } catch {
-    body = {};
-  }
-
-  if (body.password !== env.ADMIN_PASSWORD) {
+  if (String(body.password || "") !== String(env.ADMIN_PASSWORD)) {
     return json({ error: "Wrong password." }, 401);
   }
 
-  const url = new URL(request.url);
-  const secure = url.protocol === "https:" || url.hostname === "localhost";
+  const token = await createToken(env);
 
-  const cookie = await createSessionCookie(env, secure);
-
-  return new Response(
-    JSON.stringify({ ok: true }),
-    {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "set-cookie": cookie,
-      },
-    }
-  );
+  return json({ ok: true, token });
 }
