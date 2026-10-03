@@ -20,9 +20,12 @@
     #player { position: fixed; top:0; left:0; width:100%; height:100%; background:black; display:none; z-index: 10; align-items: center; justify-content: center; }
     #player iframe, #player video { width: 100%; height: 100%; border: none; object-fit: contain; }
     #standby-text { color: #333; font-size: 80px; font-weight: 900; letter-spacing: 10px; }
-    #sound-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 30; display: none; align-items: center; justify-content: center; cursor: pointer; flex-direction: column; gap: 20px; }
-    #sound-overlay span { color: #ffb02e; font-size: 32px; font-weight: 800; letter-spacing: 2px; text-align: center; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
-    #paused-overlay { position: fixed; inset: 0; z-index: 32; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); color: #ffb02e; font-size: 64px; font-weight: 900; letter-spacing: 8px; pointer-events: none; }
+    #paused-badge {
+      position: fixed; top: 24px; left: 24px; z-index: 35; display: none;
+      background: rgba(0,0,0,0.65); border: 1px solid #ffb02e66; color: #ffb02e;
+      font-family: monospace; font-size: 18px; font-weight: 700; letter-spacing: 3px;
+      padding: 10px 16px; border-radius: 6px; pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -41,8 +44,7 @@
   </div>
 
   <div id="player"></div>
-  <div id="paused-overlay">⏸ PAUSED</div>
-  <div id="sound-overlay"><span>🔊 TAP TO ENABLE SOUND</span></div>
+  <div id="paused-badge">⏸ PAUSED</div>
 
   <script>
     const LS_CODE = "gymcast_tv_code";
@@ -51,20 +53,30 @@
     const savedCode = localStorage.getItem(LS_CODE);
     const activation = document.getElementById("activation");
     const player = document.getElementById("player");
-    const pausedOverlay = document.getElementById("paused-overlay");
+    const pausedBadge = document.getElementById("paused-badge");
     const errorEl = document.getElementById("error");
     const digits = document.querySelectorAll(".digit");
     const connectBtn = document.getElementById("connectBtn");
-    const soundOverlay = document.getElementById("sound-overlay");
 
     let idleDelay = 600 * 1000;
     let currentPlaylist = [];
     let currentIndex = 0;
     let ytPlayer = null;
     let htmlVid = null;
-    let soundUnlocked = false;
     let paused = false;
     let vol = 100;
+    let audioUnlocked = false;
+
+    // Silent audio unlock: the first touch/click/keypress anywhere unmutes.
+    // No overlay, no button, no question — it just happens.
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      if (htmlVid) { htmlVid.muted = false; htmlVid.volume = vol / 100; }
+      if (ytPlayer && ytPlayer.unMute) { ytPlayer.unMute(); ytPlayer.setVolume(vol); }
+    }
+    window.addEventListener("pointerdown", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
 
     digits.forEach((d, i) => {
       d.addEventListener("input", () => { d.value = d.value.replace(/\D/g, ''); if (d.value && i < 3) digits[i+1].focus(); });
@@ -144,9 +156,9 @@
       if (paused) {
         if (htmlVid) htmlVid.pause();
         if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-        pausedOverlay.style.display = "flex";
+        pausedBadge.style.display = "block";   // show the label
       } else {
-        pausedOverlay.style.display = "none";
+        pausedBadge.style.display = "none";    // playing: show nothing
         if (htmlVid) htmlVid.play().catch(() => {});
         if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
       }
@@ -180,21 +192,34 @@
           events: {
             onReady: (event) => {
               event.target.playVideo();
+              event.target.unMute();          // sound ON by default
+              event.target.setVolume(vol);
               if (paused) event.target.pauseVideo();
-              if (soundUnlocked) { event.target.unMute(); event.target.setVolume(vol); }
             },
             onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
             onError: () => playNext()
           }
         });
-        if (!soundUnlocked) soundOverlay.style.display = "flex";
       } else {
         player.innerHTML = `<video id="html-vid" src="${video.url}" autoplay playsinline></video>`;
         htmlVid = document.getElementById("html-vid");
         htmlVid.volume = vol / 100;
         htmlVid.addEventListener('ended', playNext);
         htmlVid.addEventListener('error', playNext);
-        if (paused) { htmlVid.pause(); } else { const p = htmlVid.play(); if (p !== undefined) p.catch(() => { if (!soundUnlocked) soundOverlay.style.display = "flex"; }); }
+
+        if (paused) {
+          htmlVid.pause();
+        } else {
+          // Try FULL SOUND first. If a strict browser refuses, start muted
+          // silently and unmute on the first touch/key (no prompt ever).
+          const p = htmlVid.play();
+          if (p !== undefined) {
+            p.catch(() => {
+              htmlVid.muted = true;
+              htmlVid.play().catch(() => {});
+            });
+          }
+        }
       }
     }
 
@@ -207,17 +232,8 @@
     function showStandby() {
       player.style.display = "flex";
       player.innerHTML = `<div id="standby-text">STANDBY</div>`;
-      soundOverlay.style.display = "none";
-      pausedOverlay.style.display = "none";
+      pausedBadge.style.display = "none";
     }
-
-    soundOverlay.addEventListener("click", () => {
-      soundUnlocked = true;
-      soundOverlay.style.display = "none";
-      if (htmlVid) { htmlVid.muted = false; htmlVid.play().catch(() => {}); }
-      if (ytPlayer && ytPlayer.unMute) { ytPlayer.unMute(); ytPlayer.setVolume(vol); ytPlayer.playVideo(); }
-      try { document.documentElement.requestFullscreen?.(); } catch(e){}
-    });
   </script>
 </body>
 </html>
