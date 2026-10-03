@@ -27,8 +27,9 @@ export async function onRequest(context) {
   return json({
     tv: { code: tv.code, name: tv.name, gym: tv.gym },
     playlist,
+    paused: Boolean(tv.paused),
     settings: {
-      pollSeconds: Math.max(60, Number(settings.pollSeconds) || 60),
+      pollSeconds: Math.min(600, Math.max(60, Number(settings.pollSeconds) || 600)),
       standbyText: settings.standbyText,
       mutedAutoplay: Boolean(settings.mutedAutoplay),
       autoReloadOnError: Boolean(settings.autoReloadOnError),
