@@ -24,10 +24,10 @@
 <h1>GYMCAST PHASE-2 TEST</h1>
 <div class="sub">
   <b>FAST EDGE SUITE (~15s):</b> full server certification.<br>
-  <b>LIVE TV E2E (~4-6 min):</b> opens a REAL player window. <b>KEEP THAT WINDOW FOCUSED AND VISIBLE
-  DURING THE WHOLE RUN</b> (Chrome freezes background windows and the test dies). If your network blocks
-  the Google sample streams, playback checks are skipped with an honest WARN — your R2 streaming is
-  certified by N9 and by your real TVs. Everything cleans up after itself. Delete this file when done.
+  <b>LIVE TV E2E (~3-4 min):</b> records two 6-second test clips IN YOUR BROWSER, uploads them to your R2
+  through the real upload endpoint, then opens a REAL player window and certifies: boot, playback, sound,
+  A→B→A loop, remote PAUSE badge, RESUME, self-RESET. <b>KEEP THE POPUP WINDOW FOCUSED DURING THE RUN</b>
+  (Chrome freezes background windows). Everything cleans up after itself. Delete this file when done.
 </div>
 <div class="controls">
   <input id="password" type="password" placeholder="Admin password" autocomplete="current-password">
@@ -46,9 +46,6 @@ const summaryEl = $("#summary");
 const copyBtn = $("#copy");
 const counts = { pass: 0, fail: 0, warn: 0 };
 let TOKEN = "";
-
-const SAMPLE_A = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
-const SAMPLE_B = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
 
 function addRow(kind, name, detail) {
   const row = document.createElement("div");
@@ -77,15 +74,6 @@ async function until(fn, timeoutMs, stepMs) {
   }
   return false;
 }
-async function reachable(url) {
-  try {
-    const c = new AbortController();
-    const t = setTimeout(() => c.abort(), 8000);
-    await fetch(url, { mode: "no-cors", signal: c.signal });
-    clearTimeout(t);
-    return true;
-  } catch (e) { return false; }
-}
 
 async function req(method, url, opts) {
   opts = opts || {};
@@ -109,6 +97,32 @@ async function login() {
   if (!r.res.ok || !r.data || !r.data.token) { updateSummary("Login failed: " + (r.data && r.data.error || r.res.status)); return false; }
   TOKEN = r.data.token;
   return true;
+}
+
+// records a short colored clip with a label burned in -> real playable WebM file
+async function makeClip(seconds, label, color) {
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
+  const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(m => MediaRecorder.isTypeSupported(m));
+  if (!mime) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 320; canvas.height = 180;
+  const ctx = canvas.getContext("2d");
+  const stream = canvas.captureStream(10);
+  const rec = new MediaRecorder(stream, { mimeType: mime });
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const done = new Promise(res => { rec.onstop = res; });
+  rec.start();
+  const t0 = Date.now();
+  while (Date.now() - t0 < seconds * 1000) {
+    ctx.fillStyle = color; ctx.fillRect(0, 0, 320, 180);
+    ctx.fillStyle = "#000"; ctx.font = "bold 36px monospace";
+    ctx.fillText(label + " " + ((Date.now() - t0) / 1000).toFixed(1) + "s", 24, 100);
+    await sleep(100);
+  }
+  rec.stop();
+  await done;
+  return new File(chunks, "gce2e-" + label + ".webm", { type: "video/webm" });
 }
 
 // ================= FAST EDGE SUITE =================
@@ -148,7 +162,7 @@ async function runFast() {
     if (n4.res.status === 400) pass("N4 .exe upload rejected (400)", "");
     else fail("N4 .exe upload rejected", "status " + n4.res.status);
 
-    const tv = await req("POST", "/api/admin/videos", { body: { title: "GC N5", url: SAMPLE_A } });
+    const tv = await req("POST", "/api/admin/videos", { body: { title: "GC N5", url: "https://example.com/x.mp4" } });
     if (tv.res.status === 201) created.videos.push(tv.data.video.id);
     const n6 = await req("POST", "/api/admin/broadcast", { body: { playlistIds: ["does-not-exist"], codes: ["9310"] } });
     if (n6.res.status === 404) pass("N6 Broadcast unknown video rejected (404)", "");
@@ -219,7 +233,7 @@ async function runFast() {
 async function runLive() {
   resultsEl.innerHTML = "";
   counts.pass = counts.fail = counts.warn = 0;
-  updateSummary("LIVE E2E: probing samples, then OPEN THE POPUP AND KEEP IT FOCUSED...");
+  updateSummary("LIVE E2E: recording two 6s test clips in your browser...");
   copyBtn.hidden = true;
   if (!await login()) return;
 
@@ -227,10 +241,12 @@ async function runLive() {
   const created = { videos: [] };
   let origSettings = null;
   let tvWin = null;
-  const media = { error: 0, ended: 0, playing: 0, stalled: 0 };
+  const media = { error: 0, ended: 0, playing: 0 };
 
   try {
-    const samplesOk = (await reachable(SAMPLE_A)) && (await reachable(SAMPLE_B));
+    const clipA = await makeClip(6, "A", "#ffb02e");
+    const clipB = await makeClip(6, "B", "#4cc3ff");
+    if (!clipA || !clipB) { warn("L0 Clip recording unsupported", "This browser lacks MediaRecorder/canvas-capture. Playback certification skipped; server-side checks still valid."); }
 
     const dash0 = await req("GET", "/api/admin/dashboard");
     origSettings = dash0.data.settings;
@@ -239,14 +255,23 @@ async function runLive() {
     const cr = await req("POST", "/api/admin/tvs", { body: { code, name: "GC LIVE E2E", gym: "G1" } });
     if (cr.res.status !== 201) { fail("L0 Create E2E screen", "status " + cr.res.status); return; }
 
-    const vA = await req("POST", "/api/admin/videos", { body: { title: "GC E2E A", url: SAMPLE_A } });
-    const vB = await req("POST", "/api/admin/videos", { body: { title: "GC E2E B", url: SAMPLE_B } });
-    if (vA.res.status === 201) created.videos.push(vA.data.video.id);
-    if (vB.res.status === 201) created.videos.push(vB.data.video.id);
-
-    const bc = await req("POST", "/api/admin/broadcast", { body: { playlistIds: [vA.data.video.id, vB.data.video.id], codes: [code] } });
-    if (!bc.res.ok) { fail("L0 Send playlist", "status " + bc.res.status); return; }
-    pass("L0 Setup: screen " + code + " + playlist sent", samplesOk ? "sample host reachable" : "sample host UNREACHABLE here");
+    let urlA = null, urlB = null;
+    if (clipA && clipB) {
+      const fdA = new FormData(); fdA.append("title", "GC E2E A"); fdA.append("file", clipA);
+      const upA = await req("POST", "/api/admin/videos/upload", { form: fdA });
+      const fdB = new FormData(); fdB.append("title", "GC E2E B"); fdB.append("file", clipB);
+      const upB = await req("POST", "/api/admin/videos/upload", { form: fdB });
+      if (upA.res.status === 201 && upB.res.status === 201) {
+        created.videos.push(upA.data.video.id, upB.data.video.id);
+        urlA = upA.data.video.url; urlB = upB.data.video.url;
+        pass("L0 Setup: screen " + code + " + 2 self-recorded clips uploaded to YOUR R2", urlA.split("/").pop() + " / " + urlB.split("/").pop());
+      } else fail("L0 Upload clips to R2", upA.res.status + "/" + upB.res.status);
+    }
+    if (!urlA || !urlB) { warn("L0b Playback tests SKIPPED", "no clips available"); }
+    else {
+      const bc = await req("POST", "/api/admin/broadcast", { body: { playlistIds: created.videos.slice(-2), codes: [code] } });
+      if (!bc.res.ok) { fail("L0 Send playlist", "status " + bc.res.status); return; }
+    }
 
     localStorage.setItem("gymcast_tv_code", code);
     tvWin = window.open("/", "gctv_e2e", "width=1100,height=700");
@@ -255,14 +280,12 @@ async function runLive() {
     const doc = () => { try { return tvWin && !tvWin.closed ? tvWin.document : null; } catch (e) { return null; } };
     const vid = () => { const d = doc(); return d ? d.querySelector("#player video") : null; };
 
-    // instrument media events inside the TV window (capture phase sees video element events)
     await until(() => {
       const d = doc();
       if (!d || !d.body) return false;
       if (!d.__gcInstrumented) {
         d.__gcInstrumented = true;
-        ["error", "ended", "playing", "stalled"].forEach(ev =>
-          d.addEventListener(ev, () => { media[ev]++; }, true));
+        ["error", "ended", "playing"].forEach(ev => d.addEventListener(ev, () => { media[ev]++; }, true));
         const banner = d.createElement("div");
         banner.textContent = "🧪 E2E RUNNING — KEEP THIS WINDOW FOCUSED";
         banner.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:99;background:#ffb02e;color:#000;font:700 14px monospace;text-align:center;padding:8px;";
@@ -278,36 +301,34 @@ async function runLive() {
     if (booted) pass("L1 Player booted & auto-activated", "code " + code);
     else fail("L1 Player booted", "unexpected state");
 
-    updateSummary("LIVE E2E: watching playback (keep the TV window focused!)...");
-    const played = await until(() => { const v = vid(); return v && v.currentTime > 0.3; }, 20000, 1000);
-
-    if (played) {
-      const v = vid();
-      const t1 = v.currentTime; await sleep(1500); const t2 = vid() ? vid().currentTime : 0;
-      if (t2 > t1) pass("L2 Video playing (clock advancing)", t1.toFixed(1) + "s → " + t2.toFixed(1) + "s");
-      else fail("L2 Video clock advancing", "stuck at " + t1);
-      if (vid() && vid().muted) warn("L2b Browser blocked unmuted autoplay", "muted; first tap on TV unmutes silently.");
-      else pass("L2b Sound auto-enabled", "");
-
-      updateSummary("Watching playlist loop A→B→A (up to 100s)...");
-      const seq = [];
-      const looped = await until(() => {
+    if (urlA && urlB) {
+      updateSummary("LIVE E2E: watching playback of your own R2 clips (keep window focused!)...");
+      const played = await until(() => { const v = vid(); return v && v.currentTime > 0.3; }, 20000, 1000);
+      if (played) {
         const v = vid();
-        const src = v ? (v.currentSrc || v.src || "") : "";
-        if (src && seq[seq.length - 1] !== src) seq.push(src);
-        return seq.length >= 3 && seq[0].includes("Blazes") && seq[1].includes("Escapes") && seq[2].includes("Blazes");
-      }, 100000, 1000);
-      if (looped) pass("L3 Playlist LOOPED (A→B→A)", seq.slice(0, 3).map(s => s.split("/").pop()).join(" → "));
-      else fail("L3 Playlist loop", "seen: " + seq.map(s => s.split("/").pop()).join(" → "));
-    } else if (media.error > 0) {
-      warn("L2 Playback SKIPPED: sample media blocked by this network", media.error + " media error events (streams die mid-load). Your R2 streaming is certified by N9 + your real TVs. Re-run from another network (phone hotspot) for full playback certification.");
-      warn("L3 Loop SKIPPED", "same reason (the A→B cycling you may see IS the loop logic, driven by error-skip)");
-    } else {
-      const v = vid();
-      fail("L2 Video playing", "no playback, no media errors. diag: readyState=" + (v && v.readyState) + " networkState=" + (v && v.networkState) + " paused=" + (v && v.paused) + " — keep window focused & retry");
+        const t1 = v.currentTime; await sleep(1500); const t2 = vid() ? vid().currentTime : 0;
+        if (t2 > t1) pass("L2 Video playing (clock advancing)", t1.toFixed(1) + "s → " + t2.toFixed(1) + "s");
+        else fail("L2 Video clock advancing", "stuck at " + t1);
+        if (vid() && vid().muted) warn("L2b Browser blocked unmuted autoplay", "muted; first tap on TV unmutes silently (by design).");
+        else pass("L2b Sound auto-enabled (unmuted)", "");
+
+        updateSummary("Watching playlist loop A→B→A (up to 60s)...");
+        const seq = [];
+        const label = (u) => u === urlA ? "A" : (u === urlB ? "B" : "?");
+        const looped = await until(() => {
+          const v = vid();
+          const src = v ? (v.currentSrc || v.src || "") : "";
+          if (src && seq[seq.length - 1] !== src) seq.push(src);
+          return seq.length >= 3 && label(seq[0]) === "A" && label(seq[1]) === "B" && label(seq[2]) === "A";
+        }, 60000, 1000);
+        if (looped) pass("L3 Playlist advanced and LOOPED (A→B→A)", seq.slice(0, 3).map(label).join(" → "));
+        else fail("L3 Playlist loop", "seen: " + seq.map(label).join(" → ") + " | media errors=" + media.error + " ended=" + media.ended);
+      } else {
+        const v = vid();
+        fail("L2 Video playing", "no playback of your own R2 clip in 20s. diag: readyState=" + (v && v.readyState) + " networkState=" + (v && v.networkState) + " error=" + (v && v.error && v.error.code) + " mediaErrorEvents=" + media.error);
+      }
     }
 
-    // L4 pause: server first, then TV
     updateSummary("Sending PAUSE (server → TV, up to 80s)...");
     await req("PATCH", "/api/admin/tvs/" + code, { body: { paused: true } });
     const srvPaused = await until(async () => { const s = await req("GET", "/api/tv/state?code=" + code, { token: false }); return s.data && s.data.paused === true; }, 8000, 1000);
@@ -317,10 +338,9 @@ async function runLive() {
       const badge = d && d.getElementById("paused-badge");
       return badge && badge.style.display !== "none" && v && v.paused;
     }, 80000, 1000);
-    if (badgeOk) pass("L4 Remote PAUSE: badge + freeze on TV (self-applied)", "");
-    else fail("L4 Remote PAUSE on TV", "server says paused=true but TV shows nothing → the TV window is throttled/frozen by the browser. Keep it FOCUSED and re-run.");
+    if (badgeOk) pass("L4 Remote PAUSE: badge + freeze on TV (self-applied, no refresh)", "");
+    else fail("L4 Remote PAUSE on TV", "server says paused=true but TV shows nothing → window throttled/frozen by browser. Keep it FOCUSED and re-run.");
 
-    // L5 resume
     updateSummary("Sending RESUME (up to 80s)...");
     await req("PATCH", "/api/admin/tvs/" + code, { body: { paused: false } });
     const resumeOk = await until(() => {
@@ -331,7 +351,6 @@ async function runLive() {
     if (resumeOk) pass("L5 Remote RESUME: badge gone, playing state back", "");
     else fail("L5 Remote RESUME", "TV did not resume → window throttled? keep focused");
 
-    // L6 reset: server token first, then TV self-wipe
     updateSummary("Sending RESET (up to 80s)...");
     const stBefore = await req("GET", "/api/tv/state?code=" + code, { token: false });
     await req("POST", "/api/admin/tvs/" + code + "/reset");
@@ -349,7 +368,7 @@ async function runLive() {
     for (const id of created.videos.slice().reverse()) await req("DELETE", "/api/admin/videos/" + id);
     await req("DELETE", "/api/admin/tvs/" + code);
     if (origSettings) await req("PUT", "/api/admin/settings", { body: origSettings });
-    pass("L7 Cleanup done", "window closed, videos + screen deleted, settings restored");
+    pass("L7 Cleanup done", "window closed, clips + screen deleted, settings restored");
 
   } catch (e) {
     fail("UNEXPECTED ERROR", e.message);
