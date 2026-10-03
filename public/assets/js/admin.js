@@ -181,10 +181,11 @@ function cardHtml(tv) {
         <span class="now ${count > 0 ? "on" : ""}">${count > 0 ? (tv.paused ? "⏸ " : "▸ ") + count + " videos" : "Standby"}</span>
         <span class="seen">${D.presence[tv.code] ? timeAgo(D.presence[tv.code]) : "never"}</span>
       </div>
-      <div class="l4">
+       <div class="l4">
         <button class="mbtn" data-act="pause" data-code="${tv.code}">${tv.paused ? "▶ Play" : "⏸ Pause"}</button>
         <button class="mbtn" data-act="reload" data-code="${tv.code}">Restart</button>
         <button class="mbtn" data-act="standby" data-code="${tv.code}">Stop</button>
+        <button class="mbtn" data-act="reset" data-code="${tv.code}">Reset</button>
         <button class="mbtn danger" data-act="del" data-code="${tv.code}">Delete</button>
       </div>
     </div>
@@ -467,7 +468,18 @@ document.addEventListener("DOMContentLoaded", () => {
         toast(next ? `⏸ ${code} pauses at next check-in` : `▶ ${code} resumes at next check-in`);
         refresh();
       }
-
+       if (act === "reset") {
+        const confirmed = await modal({
+          title: `RESET SCREEN ${code}?`,
+          submit: "Reset",
+          danger: true,
+          fields: [{ name: "confirm", label: `Type ${code} to confirm — the TV will ask for its code again`, pattern: code }],
+        });
+        if (!confirmed) return;
+        await jfetch(`/api/admin/tvs/${code}/reset`, { method: "POST" });
+        toast(`Reset sent to ${code}. It returns to the code screen at next check-in.`);
+      }
+      
       if (act === "reload") {
         await jfetch(`/api/admin/tvs/${code}/reload`, { method: "POST" });
         toast(`Restart sent to ${code}.`);
