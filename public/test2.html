@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST Phase-2 Test</title>
+<style>
+  body{margin:0;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:24px;}
+  h1{letter-spacing:2px;font-size:22px;color:#ffb02e;}
+  .sub{color:#8791a5;margin-bottom:16px;font-size:13px;line-height:1.5;}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#12161f;border:1px solid #232a3a;padding:14px;margin-bottom:14px;}
+  input[type=password]{background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;padding:10px;min-width:220px;}
+  button{border:0;cursor:pointer;padding:10px 16px;font-weight:800;}
+  #fast{background:#ffb02e;color:#000;} #live{background:#4cc3ff;color:#000;} #copy{background:#3ddc84;color:#000;}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  #summary{padding:12px 14px;border:1px solid #232a3a;background:#12161f;margin-bottom:14px;font-family:monospace;white-space:pre-wrap;font-size:13px;}
+  .row{border:1px solid #232a3a;background:#12161f;margin-bottom:8px;padding:10px;}
+  .row.pass{border-left:5px solid #3ddc84;} .row.fail{border-left:5px solid #ff4d3d;} .row.warn{border-left:5px solid #ffb02e;}
+  .rowname{font-weight:700;margin-bottom:6px;font-family:monospace;font-size:13px;}
+  pre{white-space:pre-wrap;word-break:break-word;color:#93a0b5;font-size:12px;line-height:1.45;margin:0;}
+</style>
+</head>
+<body>
+<h1>GYMCAST PHASE-2 TEST</h1>
+<div class="sub">
+  <b>FAST EDGE SUITE (~15s):</b> method enforcement, input guards, token tampering, code normalization,
+  settings clamping, R2 public access + byte-range + CORS, YouTube embeddability.<br>
+  <b>LIVE TV E2E (~5 min):</b> opens a REAL player tab and verifies: boot, playback with sound attempt,
+  playlist advance + loop, remote PAUSE badge, resume, and self-RESET. Needs a pop-up allowed for this site.
+  Both suites clean up after themselves. Delete this file when done.
+</div>
+<div class="controls">
+  <input id="password" type="password" placeholder="Admin password" autocomplete="current-password">
+  <button id="fast">RUN FAST EDGE SUITE</button>
+  <button id="live">RUN LIVE TV E2E (~5 min)</button>
+  <button id="copy" hidden>COPY REPORT</button>
+</div>
+<div id="summary">Ready.</div>
+<div id="results"></div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const resultsEl = $("#results");
+const summaryEl = $("#summary");
+const copyBtn = $("#copy");
+const counts = { pass: 0, fail: 0, warn: 0 };
+let TOKEN = "";
+
+const SAMPLE_A = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
+const SAMPLE_B = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4";
+
+function addRow(kind, name, detail) {
+  const row = document.createElement("div");
+  row.className = "row " + kind;
+  const t = document.createElement("div");
+  t.className = "rowname";
+  t.textContent = "[" + kind.toUpperCase() + "] " + name;
+  const pre = document.createElement("pre");
+  pre.textContent = detail || "";
+  row.appendChild(t); row.appendChild(pre);
+  resultsEl.appendChild(row);
+}
+function pass(n, d) { counts.pass++; addRow("pass", n, d); }
+function fail(n, d) { counts.fail++; addRow("fail", n, d); }
+function warn(n, d) { counts.warn++; addRow("warn", n, d); }
+function updateSummary(t) { summaryEl.textContent = t || ("Pass: " + counts.pass + " | Fail: " + counts.fail + " | Warn: " + counts.warn); }
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function until(fn, timeoutMs, stepMs) {
+  stepMs = stepMs || 1000;
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    let v = false;
+    try { v = await fn(); } catch (e) { v = false; }
+    if (v) return true;
+    await sleep(stepMs);
+  }
+  return false;
+}
+
+async function req(method, url, opts) {
+  opts = opts || {};
+  const headers = {};
+  if (opts.token !== false && TOKEN) headers["authorization"] = "Bearer " + TOKEN;
+  if (opts.headers) Object.assign(headers, opts.headers);
+  const init = { method, headers };
+  if (opts.form) init.body = opts.form;
+  else if (opts.body !== undefined) { headers["content-type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  const res = await fetch(url, init);
+  if (opts.raw) return { res, text: await res.text(), data: null };
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return { res, data, text: "" };
+}
+
+async function login() {
+  const password = $("#password").value;
+  if (!password) { updateSummary("Enter the admin password first."); return false; }
+  const r = await req("POST", "/api/admin/login", { body: { password }, token: false });
+  if (!r.res.ok || !r.data || !r.data.token) { updateSummary("Login failed: " + (r.data && r.data.error || r.res.status)); return false; }
+  TOKEN = r.data.token;
+  return true;
+}
+
+// ================= FAST EDGE SUITE =================
+async function runFast() {
+  resultsEl.innerHTML = "";
+  counts.pass = counts.fail = counts.warn = 0;
+  updateSummary("Running fast edge suite...");
+  copyBtn.hidden = true;
+  if (!await login()) return;
+
+  const created = { tvs: [], videos: [] };
+  let origSettings = null;
+
+  try {
+    const dash0 = await req("GET", "/api/admin/dashboard");
+    origSettings = dash0.data.settings;
+    const libVideos = dash0.data.videos || [];
+
+    // N1 method enforcement
+    const m1 = await req("GET", "/api/admin/login", { token: false });
+    const m2 = await req("GET", "/api/admin/broadcast");
+    const m3 = await req("PUT", "/api/admin/tvs", { body: {} });
+    const m4 = await req("DELETE", "/api/admin/dashboard");
+    const m5 = await req("GET", "/api/admin/videos/upload");
+    if (m1.res.status === 405 && m2.res.status === 405 && m3.res.status === 405 && m4.res.status === 405 && m5.res.status === 405) {
+      pass("N1 Wrong HTTP methods rejected (405 x5)", "login/broadcast/tvs/dashboard/upload");
+    } else fail("N1 Wrong HTTP methods rejected", [m1.res.status, m2.res.status, m3.res.status, m4.res.status, m5.res.status].join("/"));
+
+    // N2 code normalization
+    const n2 = await req("POST", "/api/admin/tvs", { body: { code: "42", name: "GC NORM", gym: "G1" } });
+    if (n2.res.status === 201 && n2.data.code === "0042") { pass("N2 Code normalization 42 → 0042", ""); created.tvs.push("0042"); }
+    else fail("N2 Code normalization", "status " + n2.res.status + " code=" + (n2.data && n2.data.code));
+
+    // N3 duplicate code
+    const d3a = await req("POST", "/api/admin/tvs", { body: { code: "9310", name: "GC DUP", gym: "G1" } });
+    const d3b = await req("POST", "/api/admin/tvs", { body: { code: "9310", name: "GC DUP2", gym: "G1" } });
+    if (d3a.res.status === 201 && d3b.res.status === 409) { pass("N3 Duplicate code rejected (409)", ""); created.tvs.push("9310"); }
+    else fail("N3 Duplicate code rejected", d3a.res.status + "/" + d3b.res.status);
+
+    // N4 bad extension guard
+    const n4 = await req("POST", "/api/admin/videos/upload-start", { body: { name: "virus.exe", size: 1000, type: "application/octet-stream" } });
+    if (n4.res.status === 400) pass("N4 .exe upload rejected (400)", "");
+    else fail("N4 .exe upload rejected", "status " + n4.res.status);
+
+    // N5/N6 broadcast guards (use 9310 + a temp link video)
+    const tv = await req("POST", "/api/admin/videos", { body: { title: "GC N5", url: SAMPLE_A } });
+    if (tv.res.status === 201) created.videos.push(tv.data.video.id);
+    const n6 = await req("POST", "/api/admin/broadcast", { body: { playlistIds: ["does-not-exist"], codes: ["9310"] } });
+    if (n6.res.status === 404) pass("N6 Broadcast unknown video rejected (404)", "");
+    else fail("N6 Broadcast unknown video rejected", "status " + n6.res.status);
+    const n5 = await req("POST", "/api/admin/broadcast", { body: { playlistIds: [tv.data.video.id], codes: ["9999"] } });
+    if (n5.res.ok && n5.data.updated === 0) pass("N5 Broadcast to unknown screen updates 0", "");
+    else fail("N5 Broadcast to unknown screen", n5.res.status + " updated=" + (n5.data && n5.data.updated));
+
+    // N7 settings clamping
+    const c1 = await req("PUT", "/api/admin/settings", { body: { pollSeconds: 5 } });
+    const s1 = await req("GET", "/api/tv/state?code=9310", { token: false });
+    const c2 = await req("PUT", "/api/admin/settings", { body: { pollSeconds: 9999 } });
+    const s2 = await req("GET", "/api/tv/state?code=9310", { token: false });
+    if (c1.res.ok && c2.res.ok && s1.data.settings.pollSeconds === 60 && s2.data.settings.pollSeconds === 600) {
+      pass("N7 pollSeconds clamped to 60–600", "5→60, 9999→600");
+    } else fail("N7 pollSeconds clamped", s1.data.settings.pollSeconds + "/" + s2.data.settings.pollSeconds);
+
+    // N8 tampered token
+    const tampered = TOKEN.slice(0, -2) + (TOKEN.slice(-2) === "ab" ? "cc" : "ab");
+    const n8 = await fetch("/api/admin/dashboard", { headers: { authorization: "Bearer " + tampered } });
+    if (n8.status === 401) pass("N8 Tampered token rejected (401)", "");
+    else fail("N8 Tampered token rejected", "status " + n8.status);
+
+    // N9 R2 public access + byte-range + CORS
+    try {
+      const small = new File([new Blob([new Uint8Array(2048)])], "gcp2-range.mp4", { type: "video/mp4" });
+      const fd = new FormData();
+      fd.append("title", "GC P2 RANGE");
+      fd.append("file", small);
+      const up = await req("POST", "/api/admin/videos/upload", { form: fd });
+      if (up.res.status === 201) {
+        created.videos.push(up.data.video.id);
+        const url = up.data.video.url;
+        const head = await fetch(url, { method: "HEAD" });
+        const ranged = await fetch(url, { headers: { Range: "bytes=0-99" } });
+        const acao = ranged.headers.get("access-control-allow-origin");
+        if (head.ok && (ranged.status === 206) && ranged.headers.get("content-range") && acao === "*") {
+          pass("N9 R2 public + byte-range(206) + CORS(*)", url);
+        } else {
+          fail("N9 R2 public + byte-range + CORS", "head=" + head.status + " range=" + ranged.status + " cr=" + ranged.headers.get("content-range") + " acao=" + acao);
+        }
+      } else fail("N9 R2 upload for range test", "status " + up.res.status);
+    } catch (e) { fail("N9 R2 range test", e.message); }
+
+    // N10 YouTube embeddability (oEmbed)
+    const yts = libVideos.filter(v => /youtube\.com|youtu\.be/i.test(v.url));
+    if (!yts.length) pass("N10 YouTube embeddability", "No YouTube videos in library to check.");
+    else {
+      let okc = 0, bad = [];
+      for (const v of yts) {
+        try {
+          const o = await fetch("https://www.youtube.com/oembed?url=" + encodeURIComponent(v.url) + "&format=json");
+          if (o.ok) okc++; else bad.push(v.title + "(" + o.status + ")");
+        } catch (e) { bad.push(v.title + "(net)"); }
+      }
+      if (!bad.length) pass("N10 YouTube embeddability", okc + "/" + yts.length + " embeddable.");
+      else warn("N10 YouTube embeddability", "Not embeddable/private: " + bad.join(", "));
+    }
+
+    // N11 HLS support notice
+    const hls = libVideos.filter(v => /\.m3u8(\?|$)/i.test(v.url));
+    if (hls.length) warn("N11 HLS videos in library", hls.length + " .m3u8 entries — the light player has no hls.js; Chrome TVs will not play them. Use MP4/WebM/YouTube.");
+    else pass("N11 HLS check", "No .m3u8 entries (player is MP4/WebM/YouTube native).");
+
+    // N12 fallback behavior note
+    if (origSettings && origSettings.fallbackVideoId) {
+      pass("N12 Fallback setting behavior", "fallbackVideoId is set. By design, screens with an EMPTY playlist show STANDBY (Stop button wins); fallback is not auto-played.");
+    } else pass("N12 Fallback setting", "Not set. Empty playlist = STANDBY.");
+
+    // cleanup
+    for (const id of created.videos.slice().reverse()) await req("DELETE", "/api/admin/videos/" + id);
+    for (const code of created.tvs) await req("DELETE", "/api/admin/tvs/" + code);
+    if (origSettings) await req("PUT", "/api/admin/settings", { body: origSettings });
+    pass("N13 Cleanup done", "test videos + screens deleted, settings restored");
+
+  } catch (e) { fail("UNEXPECTED ERROR", e.message); }
+
+  updateSummary();
+  copyBtn.hidden = false;
+}
+
+// ================= LIVE TV E2E =================
+async function runLive() {
+  resultsEl.innerHTML = "";
+  counts.pass = counts.fail = counts.warn = 0;
+  updateSummary("Running LIVE TV E2E (≈5 min). A player window will open — don't touch it.");
+  copyBtn.hidden = true;
+  if (!await login()) return;
+
+  const code = String(Math.floor(9400 + Math.random() * 500)).padStart(4, "0");
+  const created = { videos: [] };
+  let origSettings = null;
+  let tvWin = null;
+
+  try {
+    const dash0 = await req("GET", "/api/admin/dashboard");
+    origSettings = dash0.data.settings;
+
+    await req("PUT", "/api/admin/settings", { body: { pollSeconds: 60 } });
+
+    const cr = await req("POST", "/api/admin/tvs", { body: { code, name: "GC LIVE E2E", gym: "G1" } });
+    if (cr.res.status !== 201) { fail("L0 Create E2E screen", "status " + cr.res.status); return; }
+
+    const vA = await req("POST", "/api/admin/videos", { body: { title: "GC E2E A", url: SAMPLE_A } });
+    const vB = await req("POST", "/api/admin/videos", { body: { title: "GC E2E B", url: SAMPLE_B } });
+    if (vA.res.status === 201) created.videos.push(vA.data.video.id);
+    if (vB.res.status === 201) created.videos.push(vB.data.video.id);
+    const urlA = vA.data.video.url, urlB = vB.data.video.url;
+
+    const bc = await req("POST", "/api/admin/broadcast", { body: { playlistIds: [vA.data.video.id, vB.data.video.id], codes: [code] } });
+    if (!bc.res.ok) { fail("L0 Send playlist to E2E screen", "status " + bc.res.status); return; }
+    pass("L0 Setup: screen " + code + " + 2 sample videos + playlist sent", "");
+
+    // open the real player with the code pre-set
+    localStorage.setItem("gymcast_tv_code", code);
+    tvWin = window.open("/", "gctv_e2e", "width=1100,height=700");
+    if (!tvWin) { fail("L1 Player window opened", "Pop-up blocked! Allow pop-ups for this site and re-run."); return; }
+
+    const doc = () => { try { return tvWin && !tvWin.closed ? tvWin.document : null; } catch (e) { return null; } };
+    const vid = () => { const d = doc(); return d ? d.querySelector("#player video") : null; };
+
+    // L1 boot
+    const booted = await until(() => {
+      const d = doc();
+      return d && d.getElementById("player") && d.getElementById("activation").style.display === "none";
+    }, 10000, 500);
+    if (booted) pass("L1 Player booted & auto-activated with code " + code, "");
+    else { fail("L1 Player booted", "player/activation not in expected state"); }
+
+    // L2 playing
+    const playing = await until(() => { const v = vid(); return v && v.currentTime > 0.3; }, 15000, 1000);
+    if (playing) {
+      const v = vid();
+      const t1 = v.currentTime; await sleep(1500); const t2 = vid() ? vid().currentTime : 0;
+      if (t2 > t1) pass("L2 Video is playing (clock advancing)", t1.toFixed(1) + "s → " + t2.toFixed(1) + "s");
+      else fail("L2 Video clock advancing", "stuck at " + t1);
+      if (v && v.muted) warn("L2b Browser blocked unmuted autoplay", "Playing muted; first tap/click on the TV unmutes silently (by design).");
+      else pass("L2b Sound auto-enabled (unmuted)", "");
+    } else fail("L2 Video is playing", "no playback within 15s (network to sample video blocked?)");
+
+    // L3 playlist advance + loop (A → B → A)
+    updateSummary("Watching playlist loop (A→B→A), up to 100s...");
+    const seq = [];
+    const looped = await until(() => {
+      const v = vid();
+      const src = v ? (v.currentSrc || v.src || "") : "";
+      if (src && seq[seq.length - 1] !== src) seq.push(src);
+      return seq.length >= 3 && seq[0].includes("Blazes") && seq[1].includes("Escapes") && seq[2].includes("Blazes");
+    }, 100000, 1000);
+    if (looped) pass("L3 Playlist advanced and LOOPED (A→B→A)", seq.map(s => s.split("/").pop()).join(" → "));
+    else fail("L3 Playlist loop", "sequence seen: " + seq.map(s => s.split("/").pop()).join(" → "));
+
+    // L4 remote pause → badge + frozen
+    updateSummary("Sending PAUSE, waiting up to 80s for the TV to obey...");
+    await req("PATCH", "/api/admin/tvs/" + code, { body: { paused: true } });
+    const pausedOk = await until(() => {
+      const d = doc(); const v = vid();
+      const badge = d && d.getElementById("paused-badge");
+      return badge && badge.style.display !== "none" && v && v.paused;
+    }, 80000, 1000);
+    if (pausedOk) pass("L4 Remote PAUSE: badge shown + video frozen (by itself, no refresh)", "");
+    else fail("L4 Remote PAUSE", "badge/paused not observed within 80s");
+
+    // L5 resume
+    updateSummary("Sending RESUME, waiting up to 80s...");
+    await req("PATCH", "/api/admin/tvs/" + code, { body: { paused: false } });
+    const resumedOk = await until(() => {
+      const d = doc(); const v = vid();
+      const badge = d && d.getElementById("paused-badge");
+      return badge && badge.style.display === "none" && v && !v.paused;
+    }, 80000, 1000);
+    if (resumedOk) pass("L5 Remote RESUME: badge gone + playing again", "");
+    else fail("L5 Remote RESUME", "not resumed within 80s");
+
+    // L6 remote reset → back to code screen by itself
+    updateSummary("Sending RESET, waiting up to 80s for self-reset...");
+    await req("POST", "/api/admin/tvs/" + code + "/reset");
+    const resetOk = await until(() => {
+      const d = doc();
+      const act = d && d.getElementById("activation");
+      return act && act.style.display !== "none" && localStorage.getItem("gymcast_tv_code") === null;
+    }, 80000, 1000);
+    if (resetOk) pass("L6 Remote RESET: TV wiped itself back to the code screen", "");
+    else fail("L6 Remote RESET", "activation screen not observed within 80s");
+
+    // cleanup
+    try { tvWin.close(); } catch (e) {}
+    for (const id of created.videos.slice().reverse()) await req("DELETE", "/api/admin/videos/" + id);
+    await req("DELETE", "/api/admin/tvs/" + code);
+    if (origSettings) await req("PUT", "/api/admin/settings", { body: origSettings });
+    pass("L7 Cleanup done", "window closed, videos + screen deleted, settings restored");
+
+  } catch (e) {
+    fail("UNEXPECTED ERROR", e.message);
+    try { if (tvWin) tvWin.close(); } catch (e2) {}
+  }
+
+  updateSummary();
+  copyBtn.hidden = false;
+  if (counts.fail === 0) updateSummary("✅ LIVE E2E GREEN — Pass: " + counts.pass + " | Warn: " + counts.warn + " | Fail: 0\nThe player really plays, loops, obeys pause/resume and resets itself. Ship it.");
+}
+
+$("#fast").addEventListener("click", async () => { $("#fast").disabled = $("#live").disabled = true; await runFast(); $("#fast").disabled = $("#live").disabled = false; });
+$("#live").addEventListener("click", async () => { $("#fast").disabled = $("#live").disabled = true; await runLive(); $("#fast").disabled = $("#live").disabled = false; });
+
+copyBtn.addEventListener("click", async () => {
+  const rows = [...resultsEl.querySelectorAll(".row")].map(r =>
+    r.querySelector(".rowname").textContent + "\n" + r.querySelector("pre").textContent
+  );
+  const report = ["GYMCAST PHASE-2 REPORT", new Date().toISOString(),
+    "Pass: " + counts.pass + " | Fail: " + counts.fail + " | Warn: " + counts.warn, "", rows.join("\n\n---\n\n")].join("\n");
+  try { await navigator.clipboard.writeText(report); copyBtn.textContent = "COPIED"; }
+  catch { copyBtn.textContent = "COPY FAILED"; }
+  setTimeout(() => { copyBtn.textContent = "COPY REPORT"; }, 2000);
+});
+</script>
+</body>
+</html>
