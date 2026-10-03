@@ -24,7 +24,7 @@
     .reset-btn:hover { color: #ff4d3d; border-color: #ff4d3d; }
     #sound-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 30; display: none; align-items: center; justify-content: center; cursor: pointer; flex-direction: column; gap: 20px; }
     #sound-overlay span { color: #ffb02e; font-size: 32px; font-weight: 800; letter-spacing: 2px; text-align: center; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
-    #blackout { position: fixed; inset: 0; background: #000; z-index: 40; display: none; }
+    #paused-overlay { position: fixed; inset: 0; z-index: 32; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); color: #ffb02e; font-size: 64px; font-weight: 900; letter-spacing: 8px; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -43,37 +43,29 @@
   </div>
 
   <div id="player"></div>
-  <div id="blackout"></div>
+  <div id="paused-overlay">⏸ PAUSED</div>
   <div id="sound-overlay"><span>🔊 TAP TO ENABLE SOUND</span></div>
   <button class="reset-btn" onclick="if(confirm('Forget this TV and start over?')){localStorage.clear(); location.reload();}">Reset TV</button>
 
   <script>
     const LS_CODE = "gymcast_tv_code";
-    const LS_SEQ = "gymcast_seq_";
     const savedCode = localStorage.getItem(LS_CODE);
     const activation = document.getElementById("activation");
     const player = document.getElementById("player");
+    const pausedOverlay = document.getElementById("paused-overlay");
     const errorEl = document.getElementById("error");
     const digits = document.querySelectorAll(".digit");
     const connectBtn = document.getElementById("connectBtn");
     const soundOverlay = document.getElementById("sound-overlay");
 
-    // Polling economy: 10 min idle, 5 s turbo for 3 min after any remote command
-    const POLL_IDLE_DEFAULT = 600 * 1000;
-    const POLL_TURBO = 5 * 1000;
-    const TURBO_WINDOW = 180 * 1000;
-    let turboUntil = 0;
-    let idleDelay = POLL_IDLE_DEFAULT;
-
+    let idleDelay = 600 * 1000;
     let currentPlaylist = [];
     let currentIndex = 0;
     let ytPlayer = null;
     let htmlVid = null;
     let soundUnlocked = false;
-    let activeCode = null;
-    let lastSeq = 0;
+    let paused = false;
     let vol = 100;
-    let blackedOut = false;
 
     digits.forEach((d, i) => {
       d.addEventListener("input", () => { d.value = d.value.replace(/\D/g, ''); if (d.value && i < 3) digits[i+1].focus(); });
@@ -99,8 +91,6 @@
     window.onYouTubeIframeAPIReady = function() { console.log("YT API Ready"); };
 
     async function startPolling(code) {
-      activeCode = code;
-      lastSeq = Number(localStorage.getItem(LS_SEQ + code) || 0);
       try { document.documentElement.requestFullscreen?.(); } catch(e){}
 
       async function poll() {
@@ -109,7 +99,6 @@
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
           const data = await res.json();
 
-          // respect the interval chosen in Admin → Automation (60–600 s)
           const secs = Number(data.settings && data.settings.pollSeconds);
           if (secs >= 60 && secs <= 600) idleDelay = secs * 1000;
 
@@ -124,87 +113,28 @@
           } else if (currentPlaylist.length === 0 && player.style.display !== "flex") {
             showStandby();
           }
+
+          applyPauseState(Boolean(data.paused));
         } catch(e) { console.error("Poll error", e); }
 
-        // remote commands ride along — no separate interval, no extra cost when idle
-        await checkCommands();
-
-        const delay = Date.now() < turboUntil ? POLL_TURBO : idleDelay;
-        setTimeout(poll, delay);
+        setTimeout(poll, idleDelay);
       }
 
       poll();
     }
 
-    async function checkCommands() {
-      if (!activeCode) return;
-      try {
-        const res = await fetch(`/api/tv/cmd?code=${activeCode}`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        const c = data.cmd;
-        if (c && c.seq > lastSeq) {
-          lastSeq = c.seq;
-          localStorage.setItem(LS_SEQ + activeCode, String(lastSeq));
-          turboUntil = Date.now() + TURBO_WINDOW; // remote session opened: go fast for 3 min
-          executeCmd(c);
-        }
-      } catch(e) {}
-    }
+    function applyPauseState(p) {
+      if (p === paused) return;
+      paused = p;
 
-    function applyVol() {
-      if (htmlVid) { htmlVid.volume = vol / 100; htmlVid.muted = (vol === 0); }
-      if (ytPlayer && ytPlayer.setVolume) { ytPlayer.setVolume(vol); }
-    }
-
-    function executeCmd(c) {
-      const cmd = c.cmd;
-      const arg = Number(c.arg) || 0;
-      const bo = document.getElementById("blackout");
-
-      switch (cmd) {
-        case "play":
-          if (htmlVid) htmlVid.play().catch(() => {});
-          if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
-          break;
-        case "pause":
-          if (htmlVid) htmlVid.pause();
-          if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-          break;
-        case "seek":
-          if (htmlVid) htmlVid.currentTime = Math.max(0, htmlVid.currentTime + arg);
-          if (ytPlayer && ytPlayer.getCurrentTime && ytPlayer.seekTo) ytPlayer.seekTo(Math.max(0, ytPlayer.getCurrentTime() + arg), true);
-          break;
-        case "mute":
-          if (htmlVid) htmlVid.muted = true;
-          if (ytPlayer && ytPlayer.mute) ytPlayer.mute();
-          break;
-        case "unmute":
-          soundUnlocked = true;
-          soundOverlay.style.display = "none";
-          if (htmlVid) htmlVid.muted = false;
-          if (ytPlayer && ytPlayer.unMute) ytPlayer.unMute();
-          break;
-        case "volup":
-          vol = Math.min(100, vol + 10); applyVol();
-          break;
-        case "voldown":
-          vol = Math.max(0, vol - 10); applyVol();
-          break;
-        case "next":
-          playNext();
-          break;
-        case "prev":
-          playPrev();
-          break;
-        case "replay":
-          if (htmlVid) { htmlVid.currentTime = 0; htmlVid.play().catch(() => {}); }
-          if (ytPlayer && ytPlayer.seekTo) { ytPlayer.seekTo(0, true); ytPlayer.playVideo(); }
-          break;
-        case "blackout":
-          blackedOut = !blackedOut;
-          bo.style.display = blackedOut ? "block" : "none";
-          break;
+      if (paused) {
+        if (htmlVid) htmlVid.pause();
+        if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+        pausedOverlay.style.display = "flex";
+      } else {
+        pausedOverlay.style.display = "none";
+        if (htmlVid) htmlVid.play().catch(() => {});
+        if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
       }
     }
 
@@ -236,6 +166,7 @@
           events: {
             onReady: (event) => {
               event.target.playVideo();
+              if (paused) event.target.pauseVideo();
               if (soundUnlocked) { event.target.unMute(); event.target.setVolume(vol); }
             },
             onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
@@ -249,20 +180,13 @@
         htmlVid.volume = vol / 100;
         htmlVid.addEventListener('ended', playNext);
         htmlVid.addEventListener('error', playNext);
-        const p = htmlVid.play();
-        if (p !== undefined) p.catch(() => { if (!soundUnlocked) soundOverlay.style.display = "flex"; });
+        if (paused) { htmlVid.pause(); } else { const p = htmlVid.play(); if (p !== undefined) p.catch(() => { if (!soundUnlocked) soundOverlay.style.display = "flex"; }); }
       }
     }
 
     function playNext() {
-      if (currentPlaylist.length === 0) return;
+      if (currentPlaylist.length === 0 || paused) return;
       currentIndex = (currentIndex + 1) % currentPlaylist.length;
-      playCurrent();
-    }
-
-    function playPrev() {
-      if (currentPlaylist.length === 0) return;
-      currentIndex = (currentIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
       playCurrent();
     }
 
@@ -270,6 +194,7 @@
       player.style.display = "flex";
       player.innerHTML = `<div id="standby-text">STANDBY</div>`;
       soundOverlay.style.display = "none";
+      pausedOverlay.style.display = "none";
     }
 
     soundOverlay.addEventListener("click", () => {
