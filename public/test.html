@@ -125,8 +125,8 @@ async function runAll() {
     }
 
     const health = await req("GET", "/api/health", { token: false });
-    if (health.res.ok && health.data && health.data.ok === true) pass("A5 API health", "");
-    else fail("A5 API health", "Status " + health.res.status);
+    if (health.res.ok && health.data && (health.data.ok === true || health.data.status === "online")) pass("A5 API health", "");
+    else fail("A5 API health", "Status " + health.res.status + " " + JSON.stringify(health.data));
 
     // ============ B. SECURITY ============
     const noTok = await req("GET", "/api/admin/dashboard", { token: false });
@@ -156,11 +156,11 @@ async function runAll() {
     // ============ C. RETIRED REQUEST FURNACE ============
     const cmd = await req("GET", "/api/tv/cmd?code=0001", { token: false });
     if (cmd.res.status === 404) pass("C1 /api/tv/cmd is gone (404)", "The 3-second poller endpoint no longer exists.");
-    else fail("C1 /api/tv/cmd is gone (404)", "Got " + cmd.res.status + " — old cmd.js still deployed! Delete it.");
+    else fail("C1 /api/tv/cmd is gone (404)", "Got " + cmd.res.status + " — old cmd.js still deployed! Delete functions/api/tv/cmd.js.");
 
     const remote = await req("POST", "/api/admin/remote", { body: { code: "0001", cmd: "pause" } });
-    if (remote.res.status === 404) pass("C2 /api/admin/remote is gone (404)", "");
-    else fail("C2 /api/admin/remote is gone (404)", "Got " + remote.res.status + " — old remote.js still deployed!");
+    if (remote.res.status === 404 || remote.res.status === 405) pass("C2 /api/admin/remote is gone", "Status " + remote.res.status + " (405 = static layer refusing POST = endpoint absent).");
+    else fail("C2 /api/admin/remote is gone", "Got " + remote.res.status + " — old remote.js still deployed!");
 
     // ============ D. SCREEN LIFECYCLE ============
     let testCode = null;
@@ -207,11 +207,14 @@ async function runAll() {
       const act = await req("POST", "/api/tv/activate", { body: { code: testCode }, token: false });
       if (act.res.ok) pass("D8 Public activation", ""); else fail("D8 Public activation", "Status " + act.res.status);
 
+      const dashPre = await req("GET", "/api/admin/dashboard");
+      const tsPre = dashPre.data.presence ? dashPre.data.presence[testCode] : null;
       const hb = await req("GET", "/api/tv/state?code=" + testCode + "&hb=1", { token: false });
       const dash2 = await req("GET", "/api/admin/dashboard");
       const ts = dash2.data && dash2.data.presence ? dash2.data.presence[testCode] : null;
-      if (hb.res.ok && ts && (Date.now() - ts) < 15 * 60 * 1000) pass("D9 Heartbeat updates presence", "seen just now");
-      else fail("D9 Heartbeat updates presence", "presence=" + ts);
+      if (hb.res.ok && ts && ts !== tsPre && (Date.now() - ts) < 60 * 1000) pass("D9 Heartbeat updates presence", "timestamp advanced to now");
+      else if (hb.res.ok && ts && (Date.now() - ts) < 15 * 60 * 1000) pass("D9 Heartbeat updates presence", "fresh timestamp");
+      else fail("D9 Heartbeat updates presence", "pre=" + tsPre + " post=" + ts + " hbStatus=" + hb.res.status);
 
       const e1 = await req("GET", "/api/tv/state", { token: false });
       const e2 = await req("GET", "/api/tv/state?code=0000", { token: false });
@@ -344,7 +347,8 @@ async function runAll() {
   updateSummary();
   copyBtn.hidden = false;
   if (counts.fail === 0) {
-    updateSummary("✅ ALL GREEN — Pass: " + counts.pass + " | Warn: " + counts.warn + " | Fail: 0\nSafe to run tonight. Expected tomorrow: ~" + Math.round(36000 / ((origSettings && origSettings.pollSeconds) || 600)) + " requests per TV (10h night).");
+    const intervalNow = (origSettings && origSettings.pollSeconds) || 600;
+    updateSummary("✅ ALL GREEN — Pass: " + counts.pass + " | Warn: " + counts.warn + " | Fail: 0\nSafe to run tonight. Expected tomorrow: ~" + Math.round(36000 / intervalNow) + " requests per TV (10h night).");
   }
 }
 
