@@ -858,11 +858,13 @@ document.addEventListener("DOMContentLoaded", () => {
   function showLogin(msg) {
     if (msg) { loginErr.textContent = msg; loginErr.hidden = false; }
     loginOv.hidden = false;
+    loginOv.style.display = "flex";
     setTimeout(() => document.getElementById("loginPass").focus(), 50);
   }
 
   function hideLogin() {
     loginOv.hidden = true;
+    loginOv.style.display = "none";
     loginErr.hidden = true;
   }
 
