@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GYMCAST Control Room</title>
   <link rel="stylesheet" href="/assets/css/admin.css" />
+  <style>
+    .login-ov{position:fixed;inset:0;background:#000d;display:flex;align-items:center;justify-content:center;z-index:80;}
+    .login-card{width:min(360px,92vw);background:#12161f;border:1px solid #232a3a;border-top:4px solid #ffb02e;padding:28px;display:flex;flex-direction:column;gap:12px;align-items:center;text-align:center;border-radius:8px;}
+    .login-card h1{letter-spacing:3px;font-size:22px;}
+    .kicker{font-family:monospace;font-size:10px;letter-spacing:3px;color:#8791a5;}
+    .login-card input{width:100%;text-align:center;padding:12px;background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;border-radius:6px;}
+    .login-card .btn{width:100%;}
+    .err{color:#ff4d3d;font-size:13px;font-family:monospace;min-height:16px;}
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -25,6 +34,7 @@
 
     <div class="top-right">
       <span id="clock" class="clock mono">--:--:--</span>
+      <button id="btnLogout" class="btn ghost sm">Log out</button>
     </div>
   </header>
 
@@ -136,9 +146,23 @@
     </section>
   </main>
 
+  <div id="loginOv" class="login-ov" hidden>
+    <form id="loginForm" class="login-card">
+      <span class="bars7">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </span>
+      <h1>GYMCAST</h1>
+      <p class="kicker">CONTROL ROOM — RESTRICTED</p>
+      <input id="loginPass" type="password" placeholder="Admin password" autocomplete="current-password" />
+      <button class="btn primary" type="submit">UNLOCK</button>
+      <p id="loginErr" class="err" hidden></p>
+    </form>
+  </div>
+
   <div id="modalRoot"></div>
   <div id="toasts" class="toasts"></div>
 
+  <script src="/assets/js/auth.js"></script>
   <script src="/assets/js/admin.js"></script>
 </body>
 </html>
