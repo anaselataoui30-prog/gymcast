@@ -1,9 +1,4 @@
-import {
-  json,
-  normalizeCode,
-  readState,
-  writeState,
-} from "../../../../../lib/core.js";
+import { json, normalizeCode, readState, writeState } from "../../../../../lib/core.js";
 
 export async function onRequest(context) {
   const method = context.request.method;
@@ -12,9 +7,7 @@ export async function onRequest(context) {
   const state = await readState(context.env);
   const tv = state.tvs.find((item) => item.code === code);
 
-  if (!tv) {
-    return json({ error: "Screen not found." }, 404);
-  }
+  if (!tv) return json({ error: "Screen not found." }, 404);
 
   if (method === "PATCH") {
     let body = {};
@@ -22,6 +15,7 @@ export async function onRequest(context) {
 
     if (body.name != null) tv.name = String(body.name).slice(0, 60);
     if (body.gym != null) tv.gym = String(body.gym);
+    if (body.paused != null) tv.paused = Boolean(body.paused);
 
     await writeState(context.env, state);
     return json({ ok: true });
