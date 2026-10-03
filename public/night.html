@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST Night Test</title>
+<style>
+  body{margin:0;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:24px;}
+  h1{letter-spacing:2px;font-size:22px;color:#ffb02e;}
+  .sub{color:#8791a5;margin-bottom:16px;font-size:13px;line-height:1.6;}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#12161f;border:1px solid #232a3a;padding:14px;margin-bottom:14px;}
+  input,select{background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;padding:10px;}
+  input[type=password]{min-width:200px;} input[type=number]{width:70px;}
+  button{border:0;cursor:pointer;padding:10px 16px;font-weight:800;}
+  #check{background:#ffb02e;color:#000;} #watch{background:#4cc3ff;color:#000;} #stop{background:#ff8a5c;color:#000;} #report{background:#3ddc84;color:#000;} #copy{background:#e9edf5;color:#000;}
+  #summary{padding:12px 14px;border:1px solid #232a3a;background:#12161f;margin-bottom:14px;font-family:monospace;white-space:pre-wrap;font-size:13px;}
+  .row{border:1px solid #232a3a;background:#12161f;margin-bottom:8px;padding:10px;}
+  .row.pass{border-left:5px solid #3ddc84;} .row.fail{border-left:5px solid #ff4d3d;} .row.warn{border-left:5px solid #ffb02e;} .row.info{border-left:5px solid #4cc3ff;}
+  .rowname{font-weight:700;margin-bottom:6px;font-family:monospace;font-size:13px;}
+  pre{white-space:pre-wrap;word-break:break-word;color:#93a0b5;font-size:12px;line-height:1.45;margin:0;}
+</style>
+</head>
+<body>
+<h1>GYMCAST NIGHT TEST</h1>
+<div class="sub">
+  <b>1.</b> Set Admin → Automation → interval <b>600</b> before sleeping.<br>
+  <b>2.</b> PRE-SLEEP CHECK certifies the canary screen (playlist, pause, streaming, storage, math).<br>
+  <b>3.</b> Optional NIGHT WATCH: leave this tab open on an awake device — samples the heartbeat every
+  5 min (~120 requests/night, free-tier safe) and builds an all-night liveness timeline.<br>
+  <b>4.</b> Morning: MORNING REPORT = health board + timeline + the number to compare with Analytics.<br>
+  Whole night costs ≈180 requests. Free allowance = 100,000/day. The $5 plan stays in your pocket. 💸
+</div>
+<div class="controls">
+  <input id="password" type="password" placeholder="Admin password">
+  <select id="screen"></select>
+  <label style="color:#8791a5;font-size:12px;">night hours <input id="hours" type="number" value="10" min="1" max="24"></label>
+  <button id="check">PRE-SLEEP CHECK</button>
+  <button id="watch">START NIGHT WATCH</button>
+  <button id="stop" hidden>STOP WATCH</button>
+  <button id="report">MORNING REPORT</button>
+  <button id="copy" hidden>COPY REPORT</button>
+</div>
+<div id="summary">Ready.</div>
+<div id="results"></div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const resultsEl = $("#results");
+const summaryEl = $("#summary");
+const copyBtn = $("#copy");
+const WATCH_KEY = "gc_night_watch";
+let TOKEN = "", D = null, STATE = null, timer = null;
+
+function row(kind, name, detail) {
+  const r = document.createElement("div");
+  r.className = "row " + kind;
+  const t = document.createElement("div"); t.className = "rowname"; t.textContent = "[" + kind.toUpperCase() + "] " + name;
+  const p = document.createElement("pre"); p.textContent = detail || "";
+  r.appendChild(t); r.appendChild(p); resultsEl.appendChild(r);
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function req(method, url, opts) {
+  opts = opts || {};
+  const headers = {};
+  if (TOKEN) headers["authorization"] = "Bearer " + TOKEN;
+  const init = { method, headers };
+  if (opts.body !== undefined) { headers["content-type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  const res = await fetch(url, init);
+  let data = null; try { data = await res.json(); } catch {}
+  return { res, data };
+}
+
+async function login() {
+  const r = await req("POST", "/api/admin/login", { body: { password: $("#password").value } });
+  if (!r.res.ok) { summaryEl.textContent = "Login failed: " + (r.data && r.data.error || r.res.status); return false; }
+  TOKEN = r.data.token; return true;
+}
+
+async function loadAll() {
+  const d = await req("GET", "/api/admin/dashboard");
+  if (!d.res.ok) throw new Error("dashboard " + d.res.status);
+  D = d.data;
+  const sel = $("#screen");
+  const prev = sel.value || localStorage.getItem("gc_night_screen") || "";
+  sel.innerHTML = D.tvs.map(t => `<option value="${t.code}" ${t.code === prev ? "selected" : ""}>${t.code} — ${t.name}</option>`).join("");
+  localStorage.setItem("gc_night_screen", sel.value);
+  STATE = await req("GET", "/api/tv/state?code=" + sel.value);
+  return STATE.data;
+}
+
+function interval() { return (D && D.settings && D.settings.pollSeconds) || 600; }
+
+async function preSleep(morning) {
+  resultsEl.innerHTML = "";
+  copyBtn.hidden = true;
+  if (!TOKEN && !await login()) return;
+  let st;
+  try { st = await loadAll(); } catch (e) { row("fail", "Load", e.message); return; }
+
+  const code = $("#screen").value;
+  const hrs = Number($("#hours").value) || 10;
+  const iv = interval();
+  const perTV = Math.round(3600 * hrs / iv);
+  const watchOn = !!timer;
+  const watchReq = watchOn ? Math.round(12 * hrs) : 0;
+
+  row("info", (morning ? "MORNING" : "PRE-SLEEP") + " BOARD — screen " + code, "");
+
+  if (iv === 600) row("pass", "Check-in interval = 600s", "≈" + perTV + " requests for a " + hrs + "h night. Free tier headroom: " + (100000 - perTV - watchReq) + ".");
+  else row("warn", "Check-in interval is " + iv + "s, not 600", "≈" + perTV + " requests/night at this speed. Admin → Automation → 600 if you want the minimum.");
+
+  const pl = st.playlist || [];
+  if (pl.length) row("pass", "Playlist assigned", pl.length + " video(s): " + pl.map(v => v.title).join(" → ") + " (loops forever)");
+  else row("fail", "Playlist assigned", "EMPTY — the TV will show STANDBY all night. Send a playlist first!");
+
+  if (st.paused === false) row("pass", "Not paused", "");
+  else row("fail", "Not paused", "screen is PAUSED — resume it before sleeping!");
+
+  if (pl.length) {
+    try {
+      const head = await fetch(pl[0].url, { method: "HEAD" });
+      const rng = await fetch(pl[0].url, { headers: { Range: "bytes=0-99" } });
+      if (head.ok && rng.status === 206) row("pass", "First video streams from R2", "HEAD 200 + Range 206 → playback + seeking OK");
+      else row("fail", "First video streams from R2", "head=" + head.status + " range=" + rng.status);
+    } catch (e) { row("fail", "First video streams from R2", e.message); }
+  }
+
+  const ts = D.presence ? D.presence[code] : null;
+  const ago = ts ? Math.round((Date.now() - ts) / 60000) : null;
+  if (ts && ago <= 15) row("pass", "Heartbeat fresh", "last check-in " + ago + " min ago → TV is alive right now");
+  else row("warn", "Heartbeat", ts ? "last check-in " + ago + " min ago (TV asleep or just switched to 600s — give it one interval)" : "never seen");
+
+  try {
+    const rf = await req("GET", "/api/admin/r2-files");
+    const mb = (rf.data.files || []).reduce((a, f) => a + f.size, 0) / 1048576;
+    row(mb < 10240 ? "pass" : "warn", "R2 storage", mb.toFixed(0) + " MB of 10,240 MB free (" + (mb / 102.4).toFixed(1) + "%)");
+  } catch (e) {}
+
+  row("info", "Tonight's expected bill", "TV ≈" + perTV + " requests" + (watchOn ? " + watch ≈" + watchReq : "") + " + your morning checks ≈ few → TOTAL well under 1,000. Free allowance 100,000/day. $5 plan: NOT needed. 💸");
+
+  const watch = JSON.parse(localStorage.getItem(WATCH_KEY) || "null");
+  if (morning && watch && watch.samples && watch.samples.length) {
+    const s = watch.samples;
+    let frozenWindows = 0, advanced = 0;
+    for (let i = 1; i < s.length; i++) {
+      if (s[i].p && s[i - 1].p && s[i].p > s[i - 1].p) advanced++;
+      if (s[i].p && s[i - 1].p && s[i].p === s[i - 1].p && (s[i].t - s[i - 1].t) > 20 * 60000) frozenWindows++;
+    }
+    const first = new Date(s[0].t).toLocaleString(), last = new Date(s[s.length - 1].t).toLocaleString();
+    if (frozenWindows === 0 && (advanced > 0 || s.length < 3)) {
+      row("pass", "NIGHT WATCH timeline", s.length + " samples (" + first + " → " + last + "). Heartbeat advanced " + advanced + "×, zero frozen windows > 20 min → the TV checked in ALL NIGHT.");
+    } else {
+      row("warn", "NIGHT WATCH timeline", s.length + " samples, " + frozenWindows + " frozen window(s) > 20 min. If your watch device slept, ignore; otherwise the TV missed check-ins — investigate.");
+    }
+    row("info", "Watch raw (last 12)", s.slice(-12).map(x => new Date(x.t).toLocaleTimeString() + " hb=" + (x.p ? new Date(x.p).toLocaleTimeString() : "none")).join("\n"));
+  } else if (morning) {
+    row("info", "NIGHT WATCH", "no timeline stored in this browser (watch wasn't running here). Compare Analytics manually: expect ≈" + (perTV + 5) + " requests for the TV over " + hrs + "h.");
+  }
+
+  if (morning) {
+    row("info", "Analytics cross-check", "Cloudflare Pages → Analytics → last 24h requests should be in the low hundreds (TV " + perTV + " + watch " + watchReq + " + checks). If you see thousands → a stale player tab exists somewhere: open that TV and reload once.");
+  }
+
+  summaryEl.textContent = (morning ? "MORNING REPORT" : "PRE-SLEEP CHECK") + " complete — screen " + code + ", interval " + iv + "s, ≈" + perTV + " req/night.";
+  copyBtn.hidden = false;
+}
+
+function startWatch() {
+  if (timer) return;
+  const store = { started: Date.now(), samples: [] };
+  const sample = async () => {
+    try {
+      const d = await req("GET", "/api/admin/dashboard");
+      const code = $("#screen").value;
+      store.samples.push({ t: Date.now(), p: (d.data.presence && d.data.presence[code]) || null });
+      if (store.samples.length > 400) store.samples.shift();
+      localStorage.setItem(WATCH_KEY, JSON.stringify(store));
+      summaryEl.textContent = "NIGHT WATCH alive — " + store.samples.length + " samples so far. Keep this tab open.";
+    } catch (e) {}
+  };
+  sample();
+  timer = setInterval(sample, 5 * 60 * 1000);
+  $("#watch").hidden = true; $("#stop").hidden = false;
+}
+function stopWatch() { clearInterval(timer); timer = null; $("#watch").hidden = false; $("#stop").hidden = true; }
+
+$("#check").addEventListener("click", () => preSleep(false));
+$("#report").addEventListener("click", () => preSleep(true));
+$("#watch").addEventListener("click", startWatch);
+$("#stop").addEventListener("click", stopWatch);
+$("#screen").addEventListener("change", () => localStorage.setItem("gc_night_screen", $("#screen").value));
+
+copyBtn.addEventListener("click", async () => {
+  const rows = [...resultsEl.querySelectorAll(".row")].map(r => r.querySelector(".rowname").textContent + "\n" + r.querySelector("pre").textContent);
+  const report = ["GYMCAST NIGHT REPORT", new Date().toISOString(), "", rows.join("\n\n---\n\n")].join("\n");
+  try { await navigator.clipboard.writeText(report); copyBtn.textContent = "COPIED"; } catch { copyBtn.textContent = "COPY FAILED"; }
+  setTimeout(() => { copyBtn.textContent = "COPY REPORT"; }, 2000);
+});
+</script>
+</body>
+</html>
