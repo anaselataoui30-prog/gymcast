@@ -12,7 +12,7 @@
   input,select{background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;padding:10px;}
   input[type=password]{min-width:200px;} input[type=number]{width:70px;}
   button{border:0;cursor:pointer;padding:10px 16px;font-weight:800;}
-  #check{background:#ffb02e;color:#000;} #watch{background:#4cc3ff;color:#000;} #stop{background:#ff8a5c;color:#000;} #report{background:#3ddc84;color:#000;} #copy{background:#e9edf5;color:#000;}
+  #check{background:#ffb02e;color:#000;} #drill{background:#ff8a5c;color:#000;} #watch{background:#4cc3ff;color:#000;} #stop{background:#8791a5;color:#000;} #report{background:#3ddc84;color:#000;} #copy{background:#e9edf5;color:#000;}
   #summary{padding:12px 14px;border:1px solid #232a3a;background:#12161f;margin-bottom:14px;font-family:monospace;white-space:pre-wrap;font-size:13px;}
   .row{border:1px solid #232a3a;background:#12161f;margin-bottom:8px;padding:10px;}
   .row.pass{border-left:5px solid #3ddc84;} .row.fail{border-left:5px solid #ff4d3d;} .row.warn{border-left:5px solid #ffb02e;} .row.info{border-left:5px solid #4cc3ff;}
@@ -23,18 +23,19 @@
 <body>
 <h1>GYMCAST NIGHT TEST</h1>
 <div class="sub">
-  <b>1.</b> Set Admin → Automation → interval <b>600</b> before sleeping.<br>
-  <b>2.</b> PRE-SLEEP CHECK certifies the canary screen (playlist, pause, streaming, storage, math).<br>
-  <b>3.</b> Optional NIGHT WATCH: leave this tab open on an awake device — samples the heartbeat every
-  5 min (~120 requests/night, free-tier safe) and builds an all-night liveness timeline.<br>
-  <b>4.</b> Morning: MORNING REPORT = health board + timeline + the number to compare with Analytics.<br>
-  Whole night costs ≈180 requests. Free allowance = 100,000/day. The $5 plan stays in your pocket. 💸
+  <b>PRE-SLEEP CHECK</b> — certifies the canary screen + verifies the deployed player has the network-alert system.<br>
+  <b>OUTAGE DRILL (~3 min)</b> — opens a player window HERE, asks you to turn THIS computer's wifi off,
+  verifies the red "NO INTERNET" banner + ticking clock, then wifi on → green "BACK ONLINE" + resumed playback.
+  Your real TVs are never touched.<br>
+  <b>NIGHT WATCH (optional)</b> — heartbeat samples every 5 min (~120 req/night); survives refreshes now.<br>
+  <b>MORNING REPORT</b> — health board + watch timeline + outage windows + the Analytics number (use LAST 24 HOURS range).
 </div>
 <div class="controls">
   <input id="password" type="password" placeholder="Admin password">
   <select id="screen"></select>
   <label style="color:#8791a5;font-size:12px;">night hours <input id="hours" type="number" value="10" min="1" max="24"></label>
   <button id="check">PRE-SLEEP CHECK</button>
+  <button id="drill">OUTAGE DRILL</button>
   <button id="watch">START NIGHT WATCH</button>
   <button id="stop" hidden>STOP WATCH</button>
   <button id="report">MORNING REPORT</button>
@@ -59,7 +60,22 @@ function row(kind, name, detail) {
   const p = document.createElement("pre"); p.textContent = detail || "";
   r.appendChild(t); r.appendChild(p); resultsEl.appendChild(r);
 }
+const pass = (n, d) => row("pass", n, d);
+const fail = (n, d) => row("fail", n, d);
+const warn = (n, d) => row("warn", n, d);
+const info = (n, d) => row("info", n, d);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function until(fn, timeoutMs, stepMs) {
+  stepMs = stepMs || 1000;
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    let v = false;
+    try { v = await fn(); } catch (e) { v = false; }
+    if (v) return true;
+    await sleep(stepMs);
+  }
+  return false;
+}
 
 async function req(method, url, opts) {
   opts = opts || {};
@@ -92,12 +108,23 @@ async function loadAll() {
 
 function interval() { return (D && D.settings && D.settings.pollSeconds) || 600; }
 
+async function playerBuild() {
+  try {
+    const txt = await (await fetch("/", { cache: "no-store" })).text();
+    if (txt.includes("setTimeout(poll, delay)")) return "buggy";
+    if (txt.includes("net-overlay") && txt.includes("pollFn")) return "good";
+    if (txt.includes("net-overlay")) return "nonet-fix?";
+    return "old";
+  } catch (e) { return "unreadable"; }
+}
+
+// ================= PRE-SLEEP / MORNING =================
 async function preSleep(morning) {
   resultsEl.innerHTML = "";
   copyBtn.hidden = true;
   if (!TOKEN && !await login()) return;
   let st;
-  try { st = await loadAll(); } catch (e) { row("fail", "Load", e.message); return; }
+  try { st = await loadAll(); } catch (e) { fail("Load", e.message); return; }
 
   const code = $("#screen").value;
   const hrs = Number($("#hours").value) || 10;
@@ -106,31 +133,37 @@ async function preSleep(morning) {
   const watchOn = !!timer;
   const watchReq = watchOn ? Math.round(12 * hrs) : 0;
 
-  row("info", (morning ? "MORNING" : "PRE-SLEEP") + " BOARD — screen " + code, "");
+  info((morning ? "MORNING" : "PRE-SLEEP") + " BOARD — screen " + code, "");
 
-  if (iv === 600) row("pass", "Check-in interval = 600s", "≈" + perTV + " requests for a " + hrs + "h night. Free tier headroom: " + (100000 - perTV - watchReq) + ".");
-  else row("warn", "Check-in interval is " + iv + "s, not 600", "≈" + perTV + " requests/night at this speed. Admin → Automation → 600 if you want the minimum.");
+  const build = await playerBuild();
+  if (build === "good") pass("Player build", "network-alert system + poll-chain fix deployed");
+  else if (build === "buggy") fail("Player build", "BUGGY build deployed (poll chain dies after one cycle) — push the corrected index.html NOW");
+  else if (build === "old") warn("Player build", "deployed player has NO network-alert system — push the new index.html");
+  else warn("Player build", "could not classify player build (" + build + ")");
+
+  if (iv === 600) pass("Check-in interval = 600s", "≈" + perTV + " requests for a " + hrs + "h night. Free headroom: " + (100000 - perTV - watchReq) + ".");
+  else warn("Check-in interval is " + iv + "s, not 600", "≈" + perTV + " requests/night at this speed. Admin → Automation → 600 for the minimum.");
 
   const pl = st.playlist || [];
-  if (pl.length) row("pass", "Playlist assigned", pl.length + " video(s): " + pl.map(v => v.title).join(" → ") + " (loops forever)");
-  else row("fail", "Playlist assigned", "EMPTY — the TV will show STANDBY all night. Send a playlist first!");
+  if (pl.length) pass("Playlist assigned", pl.length + " video(s): " + pl.map(v => v.title).join(" → ") + " (loops forever)");
+  else fail("Playlist assigned", "EMPTY — the TV will show STANDBY all night. Send a playlist first!");
 
-  if (st.paused === false) row("pass", "Not paused", "");
-  else row("fail", "Not paused", "screen is PAUSED — resume it before sleeping!");
+  if (st.paused === false) pass("Not paused", "");
+  else fail("Not paused", "screen is PAUSED — resume it before sleeping!");
 
   if (pl.length) {
     try {
       const head = await fetch(pl[0].url, { method: "HEAD" });
       const rng = await fetch(pl[0].url, { headers: { Range: "bytes=0-99" } });
-      if (head.ok && rng.status === 206) row("pass", "First video streams from R2", "HEAD 200 + Range 206 → playback + seeking OK");
-      else row("fail", "First video streams from R2", "head=" + head.status + " range=" + rng.status);
-    } catch (e) { row("fail", "First video streams from R2", e.message); }
+      if (head.ok && rng.status === 206) pass("First video streams from R2", "HEAD 200 + Range 206 → playback + seeking OK");
+      else fail("First video streams from R2", "head=" + head.status + " range=" + rng.status);
+    } catch (e) { fail("First video streams from R2", e.message); }
   }
 
   const ts = D.presence ? D.presence[code] : null;
   const ago = ts ? Math.round((Date.now() - ts) / 60000) : null;
-  if (ts && ago <= 15) row("pass", "Heartbeat fresh", "last check-in " + ago + " min ago → TV is alive right now");
-  else row("warn", "Heartbeat", ts ? "last check-in " + ago + " min ago (TV asleep or just switched to 600s — give it one interval)" : "never seen");
+  if (ts && ago <= 15) pass("Heartbeat fresh", "last check-in " + ago + " min ago → TV alive right now");
+  else warn("Heartbeat", ts ? "last check-in " + ago + " min ago (wifi outage? or just switched interval — give it one cycle)" : "never seen");
 
   try {
     const rf = await req("GET", "/api/admin/r2-files");
@@ -138,38 +171,113 @@ async function preSleep(morning) {
     row(mb < 10240 ? "pass" : "warn", "R2 storage", mb.toFixed(0) + " MB of 10,240 MB free (" + (mb / 102.4).toFixed(1) + "%)");
   } catch (e) {}
 
-  row("info", "Tonight's expected bill", "TV ≈" + perTV + " requests" + (watchOn ? " + watch ≈" + watchReq : "") + " + your morning checks ≈ few → TOTAL well under 1,000. Free allowance 100,000/day. $5 plan: NOT needed. 💸");
+  info("Tonight's expected bill", "TV ≈" + perTV + " + watch ≈" + watchReq + " + checks ≈ few → well under 1,000 requests. Free allowance 100,000/day. $5 plan: NOT needed. 💸");
 
+  // ---- watch timeline ----
   const watch = JSON.parse(localStorage.getItem(WATCH_KEY) || "null");
   if (morning && watch && watch.samples && watch.samples.length) {
     const s = watch.samples;
     let frozenWindows = 0, advanced = 0;
+    const outages = [];
     for (let i = 1; i < s.length; i++) {
-      if (s[i].p && s[i - 1].p && s[i].p > s[i - 1].p) advanced++;
+      if (s[i].p && s[i - 1].p && s[i].p > s[i - 1].p) {
+        advanced++;
+        const gapMin = Math.round((s[i].t - s[i - 1].t) / 60000);
+        if (gapMin > 15) outages.push(gapMin);
+      }
       if (s[i].p && s[i - 1].p && s[i].p === s[i - 1].p && (s[i].t - s[i - 1].t) > 20 * 60000) frozenWindows++;
     }
     const first = new Date(s[0].t).toLocaleString(), last = new Date(s[s.length - 1].t).toLocaleString();
-    if (frozenWindows === 0 && (advanced > 0 || s.length < 3)) {
-      row("pass", "NIGHT WATCH timeline", s.length + " samples (" + first + " → " + last + "). Heartbeat advanced " + advanced + "×, zero frozen windows > 20 min → the TV checked in ALL NIGHT.");
+    if (frozenWindows === 0 && advanced > 0 && s.length >= 3) {
+      pass("NIGHT WATCH timeline", s.length + " samples (" + first + " → " + last + "). Heartbeat advanced " + advanced + "×, zero frozen windows → TV checked in ALL NIGHT.");
+    } else if (s.length < 3 || advanced === 0) {
+      warn("NIGHT WATCH timeline", "Only " + s.length + " sample(s) (watch device slept or tab refreshed). Watch can't prove liveness — rely on heartbeat + Analytics + your eyes.");
     } else {
-      row("warn", "NIGHT WATCH timeline", s.length + " samples, " + frozenWindows + " frozen window(s) > 20 min. If your watch device slept, ignore; otherwise the TV missed check-ins — investigate.");
+      warn("NIGHT WATCH timeline", s.length + " samples, " + frozenWindows + " frozen window(s) > 20 min — investigate or ignore if the watch device slept.");
     }
-    row("info", "Watch raw (last 12)", s.slice(-12).map(x => new Date(x.t).toLocaleTimeString() + " hb=" + (x.p ? new Date(x.p).toLocaleTimeString() : "none")).join("\n"));
+    if (outages.length) info("Estimated outage windows (5-min resolution)", outages.map(m => "~" + m + " min").join(", ") + " — matches your wifi crashes; the TV banner handled them.");
+    else if (advanced > 0) info("Estimated outage windows", "none longer than 15 min detected.");
+    info("Watch raw (last 12)", s.slice(-12).map(x => new Date(x.t).toLocaleTimeString() + " hb=" + (x.p ? new Date(x.p).toLocaleTimeString() : "none")).join("\n"));
   } else if (morning) {
-    row("info", "NIGHT WATCH", "no timeline stored in this browser (watch wasn't running here). Compare Analytics manually: expect ≈" + (perTV + 5) + " requests for the TV over " + hrs + "h.");
+    info("NIGHT WATCH", "no timeline in this browser (watch wasn't running here). Compare Analytics manually: expect ≈" + (perTV + 5) + " requests for the TV over " + hrs + "h.");
   }
 
-  if (morning) {
-    row("info", "Analytics cross-check", "Cloudflare Pages → Analytics → last 24h requests should be in the low hundreds (TV " + perTV + " + watch " + watchReq + " + checks). If you see thousands → a stale player tab exists somewhere: open that TV and reload once.");
-  }
+  if (morning) info("Analytics cross-check", "Cloudflare Pages → Analytics → set range to LAST 24 HOURS (default counts only since midnight — that's why you once saw 29). Expect low hundreds. Thousands → stale player tab: reload that TV once.");
 
   summaryEl.textContent = (morning ? "MORNING REPORT" : "PRE-SLEEP CHECK") + " complete — screen " + code + ", interval " + iv + "s, ≈" + perTV + " req/night.";
   copyBtn.hidden = false;
 }
 
+// ================= OUTAGE DRILL =================
+async function drill() {
+  resultsEl.innerHTML = "";
+  copyBtn.hidden = true;
+  if (!TOKEN && !await login()) return;
+  let st;
+  try { st = await loadAll(); } catch (e) { fail("Load", e.message); return; }
+  const code = $("#screen").value;
+
+  if (!(st.playlist || []).length) { fail("Drill precondition", "selected screen has no playlist — assign one first"); return; }
+  const build = await playerBuild();
+  if (build === "buggy") { fail("Player build", "BUGGY build deployed — push corrected index.html first"); return; }
+  if (build !== "good") { fail("Player build", "deployed player lacks the network-alert system (" + build + ") — push the new index.html first"); return; }
+  pass("D0 Player build OK", "network-alert system + poll-chain fix present");
+
+  localStorage.setItem("gymcast_tv_code", code);
+  const tvWin = window.open("/", "gc_drill", "width=1000,height=650");
+  if (!tvWin) { fail("Drill window", "popup blocked — allow pop-ups and retry"); return; }
+
+  const doc = () => { try { return tvWin && !tvWin.closed ? tvWin.document : null; } catch (e) { return null; } };
+  const overlay = () => { const d = doc(); return d ? d.getElementById("net-overlay") : null; };
+  const vid = () => { const d = doc(); return d ? d.querySelector("#player video") : null; };
+
+  const booted = await until(() => { const d = doc(); return d && d.getElementById("player"); }, 10000, 500);
+  if (!booted) { fail("D1 Drill window booted", "player never started"); try { tvWin.close(); } catch (e) {} return; }
+  pass("D1 Drill window booted", "code " + code);
+
+  const playing = await until(() => { const v = vid(); return v && v.currentTime > 0.3; }, 20000, 1000);
+  if (playing) pass("D2 Playback before drill", "video flowing");
+  else warn("D2 Playback before drill", "no playback in 20s — drill continues, resume check may be moot");
+
+  info("ACTION REQUIRED", "🔌 TURN OFF THIS COMPUTER'S WIFI NOW (or unplug the router). The drill reads the TV window locally — it keeps working with no network.");
+  const downSeen = await until(() => { const o = overlay(); return o && o.classList.contains("down"); }, 90000, 1000);
+  if (downSeen) pass("D3 Outage banner appeared", (doc() && doc().getElementById("net-title").textContent) || "");
+  else fail("D3 Outage banner appeared", "no red banner within 90s — was wifi really off?");
+
+  await sleep(5000);
+  const sub1 = doc() ? (doc().getElementById("net-sub").textContent || "") : "";
+  if (/waiting for network/.test(sub1)) pass("D4 Waiting clock ticking", sub1);
+  else warn("D4 Waiting clock ticking", sub1 || "(no subtext)");
+
+  info("ACTION REQUIRED", "🔌 TURN WIFI BACK ON NOW.");
+  const okSeen = await until(() => { const o = overlay(); return o && o.classList.contains("ok"); }, 120000, 1000);
+  if (okSeen) pass("D5 Recovery banner appeared", "✔ BACK ONLINE — RESUMING");
+  else warn("D5 Recovery banner appeared", "no green flash caught (recovery may have happened between samples) — verifying playback instead");
+
+  let advanced = false;
+  const hiddenAndPlaying = await until(async () => {
+    const o = overlay(); const v = vid();
+    const hidden = !o || o.style.display === "none";
+    if (hidden && v && v.currentTime > 0.3) {
+      const a = v.currentTime; await sleep(2000);
+      const b = vid() ? vid().currentTime : 0;
+      if (b > a) { advanced = true; return true; }
+    }
+    return false;
+  }, 90000, 1000);
+  if (hiddenAndPlaying && advanced) pass("D6 Playback resumed after recovery", "banner gone + clock advancing");
+  else fail("D6 Playback resumed after recovery", "banner hidden & advancing = " + hiddenAndPlaying);
+
+  try { tvWin.close(); } catch (e) {}
+  pass("D7 Drill complete", "window closed — your real TVs were never touched");
+  summaryEl.textContent = "OUTAGE DRILL finished — rows D0–D7.";
+  copyBtn.hidden = false;
+}
+
+// ================= NIGHT WATCH =================
 function startWatch() {
   if (timer) return;
-  const store = { started: Date.now(), samples: [] };
+  const store = JSON.parse(localStorage.getItem(WATCH_KEY) || "null") || { started: Date.now(), samples: [] };
   const sample = async () => {
     try {
       const d = await req("GET", "/api/admin/dashboard");
@@ -177,7 +285,7 @@ function startWatch() {
       store.samples.push({ t: Date.now(), p: (d.data.presence && d.data.presence[code]) || null });
       if (store.samples.length > 400) store.samples.shift();
       localStorage.setItem(WATCH_KEY, JSON.stringify(store));
-      summaryEl.textContent = "NIGHT WATCH alive — " + store.samples.length + " samples so far. Keep this tab open.";
+      summaryEl.textContent = "NIGHT WATCH alive — " + store.samples.length + " samples. Keep this tab open.";
     } catch (e) {}
   };
   sample();
@@ -188,6 +296,7 @@ function stopWatch() { clearInterval(timer); timer = null; $("#watch").hidden = 
 
 $("#check").addEventListener("click", () => preSleep(false));
 $("#report").addEventListener("click", () => preSleep(true));
+$("#drill").addEventListener("click", async () => { $("#drill").disabled = true; await drill(); $("#drill").disabled = false; });
 $("#watch").addEventListener("click", startWatch);
 $("#stop").addEventListener("click", stopWatch);
 $("#screen").addEventListener("change", () => localStorage.setItem("gc_night_screen", $("#screen").value));
