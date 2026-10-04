@@ -96,6 +96,7 @@
     // ---------- network resilience state ----------
     let netDown = false;
     let buffering = false;
+    let bufferTimer = null;
     let downSince = 0;
     let downClock = null;
     let retryTimer = null;
@@ -104,12 +105,13 @@
     let pollTimer = null;
     let pollFn = null;
 
-    // ---------- wall-clock playlist sync ----------
-    let serverOffset = 0;      // ms to add to Date.now() to match server time
+    // ---------- wall-clock schedule sync ----------
+    let serverOffset = 0;
     let syncEnabled = false;
-    let segStart = [];         // cumulative start seconds per playlist item
-    let totalDur = 0;          // playlist total seconds
-    let pendingSeek = null;    // seek to apply once metadata loads
+    let segStart = [];
+    let totalDur = 0;
+    let pendingSeek = null;
+    let midFixUsed = false;   // one emergency mid-video correction per video max
 
     const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
     const correctedNow = () => Date.now() + serverOffset;
@@ -136,6 +138,7 @@
       clearTimeout(retryTimer); retryTimer = null;
 
       if (on) {
+        clearTimeout(bufferTimer); buffering = false;
         downSince = Date.now();
         netOverlay.classList.remove("slow", "ok");
         netOverlay.classList.add("down");
@@ -160,17 +163,25 @@
       }
     }
 
+    // Buffering banner only after 2.5s of REAL stall — no more flicker on tiny hiccups.
     function setBuffering(on) {
-      if (on === buffering || netDown) return;
-      buffering = on;
       if (on) {
-        netOverlay.classList.remove("down", "ok");
-        netOverlay.classList.add("slow");
-        netOverlay.style.display = "flex";
-        netTitle.textContent = "⏳ SLOW NETWORK — BUFFERING";
-        netSub.textContent = "the system is fine · loading video…";
-      } else if (!netDown) {
-        netOverlay.style.display = "none";
+        if (buffering || netDown) return;
+        clearTimeout(bufferTimer);
+        bufferTimer = setTimeout(() => {
+          if (netDown) return;
+          buffering = true;
+          netOverlay.classList.remove("down", "ok");
+          netOverlay.classList.add("slow");
+          netOverlay.style.display = "flex";
+          netTitle.textContent = "⏳ SLOW NETWORK — BUFFERING";
+          netSub.textContent = "the system is fine · loading video…";
+        }, 2500);
+      } else {
+        clearTimeout(bufferTimer);
+        if (!buffering) return;
+        buffering = false;
+        if (!netDown) netOverlay.style.display = "none";
       }
     }
 
@@ -198,7 +209,7 @@
     window.addEventListener("offline", () => setNetDown(true, "📡 NO INTERNET — GYMCAST AUTO-RETRY"));
     window.addEventListener("online", () => setTimeout(probe, 2000));
 
-    // ---------- sync helpers ----------
+    // ---------- schedule helpers ----------
     function probeDuration(url) {
       return new Promise((resolve) => {
         const el = document.createElement("video");
@@ -215,7 +226,7 @@
     async function loadDurations(playlist) {
       const out = {};
       for (const v of playlist) {
-        if (isYTUrl(v.url)) return null;   // sync only pure MP4/R2 playlists
+        if (isYTUrl(v.url)) return null;   // schedule sync only for pure MP4/R2 playlists
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem("gc_dur_" + v.id) || "null"); } catch (e) {}
         if (cached && cached.u === v.url && cached.d > 0) { out[v.id] = cached.d; continue; }
@@ -247,18 +258,24 @@
       return { idx, off: pos - segStart[idx] };
     }
 
+    // The conductor: checks the schedule every 5s but ONLY acts on gross drift (>5s),
+    // only once per video, and never while buffering. Normal sync happens at boundaries.
     function align() {
       if (!syncEnabled || paused || netDown || !htmlVid || !currentPlaylist.length) return;
-      if (htmlVid.readyState < 2 || htmlVid.seeking) return;
+      if (buffering || htmlVid.readyState < 2 || htmlVid.seeking) return;
       try {
         const t = targetAt(correctedNow());
         if (t.idx !== currentIndex) {
           currentIndex = t.idx;
           pendingSeek = t.off;
+          midFixUsed = false;
           playCurrent();
-        } else {
+        } else if (!midFixUsed) {
           const drift = htmlVid.currentTime - t.off;
-          if (Math.abs(drift) > 1.5) htmlVid.currentTime = t.off;
+          if (Math.abs(drift) > 5) {
+            midFixUsed = true;
+            htmlVid.currentTime = t.off;
+          }
         }
       } catch (e) {}
     }
@@ -306,7 +323,6 @@
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
           if (!res.ok) throw new Error("HTTP " + res.status);
 
-          // correct our clock against the server (keeps screens in sync even with bad device clocks)
           const dh = res.headers.get("date");
           if (dh) { const st = Date.parse(dh); if (!isNaN(st)) serverOffset = st - Date.now(); }
 
@@ -344,6 +360,7 @@
             } else {
               currentIndex = 0;
             }
+            midFixUsed = false;
             playCurrent();
           } else if (currentPlaylist.length === 0 && player.style.display !== "flex") {
             showStandby();
@@ -451,10 +468,25 @@
       else playNext();
     }
 
+    // Boundary snap: when a video ends, the next one starts at EXACTLY the scheduled
+    // second — this is where lag gets corrected, cleanly, once per video.
     function playNext() {
       if (currentPlaylist.length === 0 || paused) return;
       if (netDown) { scheduleRetry(); return; }
-      currentIndex = (currentIndex + 1) % currentPlaylist.length;
+
+      let next = (currentIndex + 1) % currentPlaylist.length;
+      pendingSeek = null;
+
+      if (syncEnabled) {
+        try {
+          const t = targetAt(correctedNow());
+          if (t.idx !== next && t.idx !== currentIndex) next = t.idx;
+          if (t.idx === next) pendingSeek = t.off;
+        } catch (e) {}
+      }
+
+      currentIndex = next;
+      midFixUsed = false;
       playCurrent();
     }
 
