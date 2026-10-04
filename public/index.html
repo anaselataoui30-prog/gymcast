@@ -26,6 +26,22 @@
       font-family: monospace; font-size: 18px; font-weight: 700; letter-spacing: 3px;
       padding: 10px 16px; border-radius: 6px; pointer-events: none;
     }
+    #net-overlay {
+      position: fixed; top: 22px; left: 50%; transform: translateX(-50%);
+      z-index: 36; display: none; align-items: center; gap: 14px;
+      background: rgba(8,10,14,0.88); border: 1px solid; border-radius: 10px;
+      padding: 12px 18px; font-family: monospace; pointer-events: none;
+      box-shadow: 0 10px 30px rgba(0,0,0,.55); max-width: 92vw;
+    }
+    #net-overlay.down { border-color: #ff4d3d88; color: #ff4d3d; }
+    #net-overlay.slow { border-color: #ffb02e88; color: #ffb02e; }
+    #net-overlay.ok   { border-color: #3ddc8488; color: #3ddc84; }
+    #net-title { font-size: 16px; font-weight: 800; letter-spacing: 2px; }
+    #net-sub { font-size: 11px; opacity: .85; letter-spacing: 1px; margin-top: 3px; }
+    .netbars { display: flex; gap: 3px; align-items: flex-end; height: 20px; flex-shrink: 0; }
+    .netbars i { width: 4px; height: 20%; background: currentColor; animation: nb 1s infinite ease-in-out; border-radius: 2px; }
+    .netbars i:nth-child(2){animation-delay:.15s} .netbars i:nth-child(3){animation-delay:.3s} .netbars i:nth-child(4){animation-delay:.45s} .netbars i:nth-child(5){animation-delay:.6s}
+    @keyframes nb { 0%,100%{height:20%} 50%{height:100%} }
   </style>
 </head>
 <body>
@@ -45,6 +61,13 @@
 
   <div id="player"></div>
   <div id="paused-badge">⏸ PAUSED</div>
+  <div id="net-overlay">
+    <span class="netbars"><i></i><i></i><i></i><i></i><i></i></span>
+    <span>
+      <div id="net-title"></div>
+      <div id="net-sub"></div>
+    </span>
+  </div>
 
   <script>
     const LS_CODE = "gymcast_tv_code";
@@ -54,11 +77,14 @@
     const activation = document.getElementById("activation");
     const player = document.getElementById("player");
     const pausedBadge = document.getElementById("paused-badge");
+    const netOverlay = document.getElementById("net-overlay");
+    const netTitle = document.getElementById("net-title");
+    const netSub = document.getElementById("net-sub");
     const errorEl = document.getElementById("error");
     const digits = document.querySelectorAll(".digit");
     const connectBtn = document.getElementById("connectBtn");
 
-    let idleDelay = 600 * 1000;
+    let idleDelay = 60 * 1000;
     let currentPlaylist = [];
     let currentIndex = 0;
     let ytPlayer = null;
@@ -67,8 +93,102 @@
     let vol = 100;
     let audioUnlocked = false;
 
-    // Silent audio unlock: the first touch/click/keypress anywhere unmutes.
-    // No overlay, no button, no question — it just happens.
+    // ---------- network resilience state ----------
+    let netDown = false;
+    let buffering = false;
+    let downSince = 0;
+    let downClock = null;
+    let retryTimer = null;
+    let probeTimer = null;
+    let probing = false;
+    let pollTimer = null;
+    let pollFn = null;
+
+    function fmtDur(ms) {
+      const s = Math.floor(ms / 1000);
+      return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    function schedulePoll(delay) {
+      clearTimeout(pollTimer);
+      pollTimer = setTimeout(() => { if (pollFn) pollFn(); }, delay);
+    }
+
+    function mediaIsDead() {
+      const v = document.getElementById("html-vid");
+      if (v) return Boolean(v.error) || v.readyState === 0;
+      return !ytPlayer && currentPlaylist.length > 0;
+    }
+
+    function setNetDown(on, reason) {
+      if (on === netDown) { if (on && reason) netTitle.textContent = reason; return; }
+      netDown = on;
+      clearTimeout(retryTimer); retryTimer = null;
+
+      if (on) {
+        downSince = Date.now();
+        netOverlay.classList.remove("slow", "ok");
+        netOverlay.classList.add("down");
+        netOverlay.style.display = "flex";
+        netTitle.textContent = reason || "📡 NO INTERNET — GYMCAST AUTO-RETRY";
+        netSub.textContent = "the system is fine · waiting for network · 00:00";
+        clearInterval(downClock);
+        downClock = setInterval(() => {
+          if (netDown) netSub.textContent = "the system is fine · waiting for network · " + fmtDur(Date.now() - downSince);
+        }, 1000);
+        if (!probeTimer) probeTimer = setInterval(() => { if (netDown) probe(); }, 15000);
+      } else {
+        clearInterval(downClock); downClock = null;
+        if (probeTimer) { clearInterval(probeTimer); probeTimer = null; }
+        netOverlay.classList.remove("slow", "down");
+        netOverlay.classList.add("ok");
+        netOverlay.style.display = "flex";
+        netTitle.textContent = "✔ BACK ONLINE — RESUMING";
+        netSub.textContent = "";
+        setTimeout(() => { if (!netDown && !buffering) netOverlay.style.display = "none"; }, 3000);
+        if (!paused && mediaIsDead()) playCurrent();
+      }
+    }
+
+    function setBuffering(on) {
+      if (on === buffering || netDown) return;
+      buffering = on;
+      if (on) {
+        netOverlay.classList.remove("down", "ok");
+        netOverlay.classList.add("slow");
+        netOverlay.style.display = "flex";
+        netTitle.textContent = "⏳ SLOW NETWORK — BUFFERING";
+        netSub.textContent = "the system is fine · loading video…";
+      } else if (!netDown) {
+        netOverlay.style.display = "none";
+      }
+    }
+
+    async function probe() {
+      if (probing || !netDown) return;
+      probing = true;
+      try {
+        const res = await fetch("/api/health?r=" + Date.now(), { cache: "no-store" });
+        if (res.ok) {
+          setNetDown(false);
+          schedulePoll(1500);
+        }
+      } catch (e) {}
+      probing = false;
+    }
+
+    function scheduleRetry() {
+      if (retryTimer || !netDown) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (netDown && !paused) playCurrent();
+      }, 10000);
+    }
+
+    window.addEventListener("offline", () => setNetDown(true, "📡 NO INTERNET — GYMCAST AUTO-RETRY"));
+    window.addEventListener("online", () => setTimeout(probe, 2000));
+
+    // Silent audio unlock: first touch/click/keypress anywhere unmutes. No prompt ever.
     function unlockAudio() {
       if (audioUnlocked) return;
       audioUnlocked = true;
@@ -108,7 +228,10 @@
         try {
           const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
+          if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
+
+          if (netDown) setNetDown(false);
 
           // Admin pressed "Restart": reload the page, keep the code
           if (data.reloadToken && localStorage.getItem(LS_TOK) !== data.reloadToken) {
@@ -141,11 +264,15 @@
           }
 
           applyPauseState(Boolean(data.paused));
-        } catch(e) { console.error("Poll error", e); }
+        } catch(e) {
+          console.error("Poll error", e);
+          setNetDown(true);
+        }
 
-        setTimeout(poll, idleDelay);
+        schedulePoll(idleDelay);
       }
 
+      pollFn = poll;
       poll();
     }
 
@@ -156,9 +283,9 @@
       if (paused) {
         if (htmlVid) htmlVid.pause();
         if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-        pausedBadge.style.display = "block";   // show the label
+        pausedBadge.style.display = "block";
       } else {
-        pausedBadge.style.display = "none";    // playing: show nothing
+        pausedBadge.style.display = "none";
         if (htmlVid) htmlVid.play().catch(() => {});
         if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
       }
@@ -181,7 +308,7 @@
       const isYT = /youtube\.com|youtu\.be/i.test(video.url);
 
       if (ytPlayer) { try { ytPlayer.destroy(); } catch(e){} ytPlayer = null; }
-      if (htmlVid) { htmlVid.removeEventListener('ended', playNext); htmlVid.removeEventListener('error', playNext); htmlVid = null; }
+      if (htmlVid) { htmlVid.removeEventListener('ended', playNext); htmlVid.removeEventListener('error', onMediaError); htmlVid = null; }
 
       if (isYT) {
         const id = getYTId(video.url);
@@ -192,12 +319,12 @@
           events: {
             onReady: (event) => {
               event.target.playVideo();
-              event.target.unMute();          // sound ON by default
+              event.target.unMute();
               event.target.setVolume(vol);
               if (paused) event.target.pauseVideo();
             },
             onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
-            onError: () => playNext()
+            onError: () => { if (netDown) scheduleRetry(); else playNext(); }
           }
         });
       } else {
@@ -205,13 +332,15 @@
         htmlVid = document.getElementById("html-vid");
         htmlVid.volume = vol / 100;
         htmlVid.addEventListener('ended', playNext);
-        htmlVid.addEventListener('error', playNext);
+        htmlVid.addEventListener('error', onMediaError);
+        htmlVid.addEventListener('waiting', () => setBuffering(true));
+        htmlVid.addEventListener('stalled', () => setBuffering(true));
+        htmlVid.addEventListener('playing', () => setBuffering(false));
+        htmlVid.addEventListener('canplay', () => setBuffering(false));
 
         if (paused) {
           htmlVid.pause();
         } else {
-          // Try FULL SOUND first. If a strict browser refuses, start muted
-          // silently and unmute on the first touch/key (no prompt ever).
           const p = htmlVid.play();
           if (p !== undefined) {
             p.catch(() => {
@@ -223,8 +352,14 @@
       }
     }
 
+    function onMediaError() {
+      if (netDown) scheduleRetry();   // wifi dead: retry the SAME video, don't skip through the playlist
+      else playNext();                // online but broken file: skip it (old behavior)
+    }
+
     function playNext() {
       if (currentPlaylist.length === 0 || paused) return;
+      if (netDown) { scheduleRetry(); return; }
       currentIndex = (currentIndex + 1) % currentPlaylist.length;
       playCurrent();
     }
