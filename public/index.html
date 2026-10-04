@@ -105,13 +105,14 @@
     let pollTimer = null;
     let pollFn = null;
 
-    // ---------- wall-clock schedule sync ----------
+    // ---------- schedule sync (rate-based phase lock) ----------
     let serverOffset = 0;
+    let bestRtt = null;
     let syncEnabled = false;
     let segStart = [];
     let totalDur = 0;
     let pendingSeek = null;
-    let midFixUsed = false;   // one emergency mid-video correction per video max
+    let midFixUsed = false;
 
     const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
     const correctedNow = () => Date.now() + serverOffset;
@@ -163,7 +164,6 @@
       }
     }
 
-    // Buffering banner only after 2.5s of REAL stall — no more flicker on tiny hiccups.
     function setBuffering(on) {
       if (on) {
         if (buffering || netDown) return;
@@ -226,7 +226,7 @@
     async function loadDurations(playlist) {
       const out = {};
       for (const v of playlist) {
-        if (isYTUrl(v.url)) return null;   // schedule sync only for pure MP4/R2 playlists
+        if (isYTUrl(v.url)) return null;
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem("gc_dur_" + v.id) || "null"); } catch (e) {}
         if (cached && cached.u === v.url && cached.d > 0) { out[v.id] = cached.d; continue; }
@@ -252,36 +252,47 @@
     }
 
     function targetAt(ms) {
-      const pos = (ms / 1000) % totalDur;
+      const pos = ((ms / 1000) % totalDur + totalDur) % totalDur;
       let idx = 0;
       for (let i = 0; i < segStart.length; i++) if (pos >= segStart[i]) idx = i;
       return { idx, off: pos - segStart[idx] };
     }
 
-    // The conductor: checks the schedule every 5s but ONLY acts on gross drift (>5s),
-    // only once per video, and never while buffering. Normal sync happens at boundaries.
+    // Phase lock: glide into sync with playbackRate (no seeks!). Seek only for
+    // gross drift (>10s, once per video) or wrong video index.
     function align() {
       if (!syncEnabled || paused || netDown || !htmlVid || !currentPlaylist.length) return;
       if (buffering || htmlVid.readyState < 2 || htmlVid.seeking) return;
       try {
         const t = targetAt(correctedNow());
+
         if (t.idx !== currentIndex) {
           currentIndex = t.idx;
-          pendingSeek = t.off;
+          pendingSeek = t.off >= 1 ? t.off : null;
           midFixUsed = false;
           playCurrent();
-        } else if (!midFixUsed) {
-          const drift = htmlVid.currentTime - t.off;
-          if (Math.abs(drift) > 5) {
-            midFixUsed = true;
-            htmlVid.currentTime = t.off;
-          }
+          return;
+        }
+
+        const drift = t.off - htmlVid.currentTime;   // >0 = behind schedule
+
+        if (!midFixUsed && Math.abs(drift) > 10) {
+          midFixUsed = true;
+          htmlVid.currentTime = Math.max(0, t.off);
+          htmlVid.playbackRate = 1;
+          return;
+        }
+
+        if (Math.abs(drift) < 0.25) {
+          if (htmlVid.playbackRate !== 1) htmlVid.playbackRate = 1;
+        } else {
+          const rate = Math.min(1.15, Math.max(0.85, 1 + drift * 0.08));
+          if (Math.abs(htmlVid.playbackRate - rate) > 0.01) htmlVid.playbackRate = rate;
         }
       } catch (e) {}
     }
     setInterval(align, 5000);
 
-    // Silent audio unlock: first touch/click/keypress anywhere unmutes. No prompt ever.
     function unlockAudio() {
       if (audioUnlocked) return;
       audioUnlocked = true;
@@ -318,13 +329,23 @@
       try { document.documentElement.requestFullscreen?.(); } catch(e){}
 
       async function poll() {
+        const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
         try {
           const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
+          const rtt = ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
+
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
           if (!res.ok) throw new Error("HTTP " + res.status);
 
+          // Ping-compensated clock: trust only the fastest ping we've ever seen.
           const dh = res.headers.get("date");
-          if (dh) { const st = Date.parse(dh); if (!isNaN(st)) serverOffset = st - Date.now(); }
+          if (dh) {
+            const st = Date.parse(dh);
+            if (!isNaN(st)) {
+              const off = st + Math.min(rtt, 4000) / 2 - Date.now();
+              if (bestRtt === null || rtt <= bestRtt) { bestRtt = rtt; serverOffset = off; }
+            }
+          }
 
           const data = await res.json();
 
@@ -356,7 +377,7 @@
             if (syncEnabled) {
               const t = targetAt(correctedNow());
               currentIndex = t.idx;
-              pendingSeek = t.off;
+              pendingSeek = t.off >= 1 ? t.off : null;
             } else {
               currentIndex = 0;
             }
@@ -384,12 +405,12 @@
       paused = p;
 
       if (paused) {
-        if (htmlVid) htmlVid.pause();
+        if (htmlVid) { htmlVid.pause(); htmlVid.playbackRate = 1; }
         if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
         pausedBadge.style.display = "block";
       } else {
         pausedBadge.style.display = "none";
-        if (htmlVid) htmlVid.play().catch(() => {});
+        if (htmlVid) { htmlVid.playbackRate = 1; htmlVid.play().catch(() => {}); }
         if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo();
       }
     }
@@ -437,6 +458,7 @@
         player.innerHTML = `<video id="html-vid" src="${video.url}" autoplay playsinline></video>`;
         htmlVid = document.getElementById("html-vid");
         htmlVid.volume = vol / 100;
+        htmlVid.playbackRate = 1;
         htmlVid.addEventListener('ended', playNext);
         htmlVid.addEventListener('error', onMediaError);
         htmlVid.addEventListener('waiting', () => setBuffering(true));
@@ -468,8 +490,7 @@
       else playNext();
     }
 
-    // Boundary snap: when a video ends, the next one starts at EXACTLY the scheduled
-    // second — this is where lag gets corrected, cleanly, once per video.
+    // Boundary snap: catch the schedule at the start of the next video (skip if <1s off).
     function playNext() {
       if (currentPlaylist.length === 0 || paused) return;
       if (netDown) { scheduleRetry(); return; }
@@ -481,7 +502,7 @@
         try {
           const t = targetAt(correctedNow());
           if (t.idx !== next && t.idx !== currentIndex) next = t.idx;
-          if (t.idx === next) pendingSeek = t.off;
+          pendingSeek = (t.idx === next && t.off >= 1) ? t.off : null;
         } catch (e) {}
       }
 
