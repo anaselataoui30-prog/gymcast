@@ -279,11 +279,19 @@
 
         const drift = t.off - htmlVid.currentTime;   // >0 = behind schedule
 
-        if (!midFixUsed && Math.abs(drift) > 30) {
-          midFixUsed = true;
-          htmlVid.currentTime = Math.max(0, t.off);
-          htmlVid.playbackRate = 1;
-          return;
+        if (!midFixUsed && Math.abs(drift) > 10) {
+          let ahead = 0;
+          try {
+            if (htmlVid.buffered && htmlVid.buffered.length) {
+              ahead = htmlVid.buffered.end(htmlVid.buffered.length - 1) - htmlVid.currentTime;
+            }
+          } catch (e) { ahead = 0; }
+          if (ahead > 6) {
+            midFixUsed = true;
+            htmlVid.currentTime = Math.max(0, t.off);
+            htmlVid.playbackRate = 1;
+            return;
+          }
         }
 
         let rate = 1;
@@ -520,6 +528,8 @@
           if (t.idx !== next && t.idx !== currentIndex) {
             next = t.idx;
             pendingSeek = t.off >= 1 ? t.off : null;
+          } else if (t.idx === next && t.off > 2) {
+            pendingSeek = t.off;   // a lagging screen snaps into line at the boundary
           }
         } catch (e) {}
       }
