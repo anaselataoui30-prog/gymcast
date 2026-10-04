@@ -136,7 +136,7 @@
         downClock = setInterval(() => {
           if (netDown) netSub.textContent = "the system is fine · waiting for network · " + fmtDur(Date.now() - downSince);
         }, 1000);
-        if (!probeTimer) probeTimer = setInterval(() => { if (netDown) probe(); }, 15000);
+      if (!probeTimer) probeTimer = setInterval(() => { if (netDown) probe(); }, 60000);
       } else {
         clearInterval(downClock); downClock = null;
         if (probeTimer) { clearInterval(probeTimer); probeTimer = null; }
@@ -323,7 +323,7 @@
               event.target.setVolume(vol);
               if (paused) event.target.pauseVideo();
             },
-            onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); },
+            onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); else if (event.data === YT.PlayerState.PLAYING && netDown) probe(); },
             onError: () => { if (netDown) scheduleRetry(); else playNext(); }
           }
         });
@@ -336,7 +336,7 @@
         htmlVid.addEventListener('waiting', () => setBuffering(true));
         htmlVid.addEventListener('stalled', () => setBuffering(true));
         htmlVid.addEventListener('playing', () => setBuffering(false));
-        htmlVid.addEventListener('canplay', () => setBuffering(false));
+        htmlVid.addEventListener('canplay', () => { setBuffering(false); if (netDown) probe(); });
 
         if (paused) {
           htmlVid.pause();
