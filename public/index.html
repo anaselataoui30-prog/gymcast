@@ -104,6 +104,16 @@
     let pollTimer = null;
     let pollFn = null;
 
+    // ---------- wall-clock playlist sync ----------
+    let serverOffset = 0;      // ms to add to Date.now() to match server time
+    let syncEnabled = false;
+    let segStart = [];         // cumulative start seconds per playlist item
+    let totalDur = 0;          // playlist total seconds
+    let pendingSeek = null;    // seek to apply once metadata loads
+
+    const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
+    const correctedNow = () => Date.now() + serverOffset;
+
     function fmtDur(ms) {
       const s = Math.floor(ms / 1000);
       return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
@@ -136,7 +146,7 @@
         downClock = setInterval(() => {
           if (netDown) netSub.textContent = "the system is fine · waiting for network · " + fmtDur(Date.now() - downSince);
         }, 1000);
-      if (!probeTimer) probeTimer = setInterval(() => { if (netDown) probe(); }, 60000);
+        if (!probeTimer) probeTimer = setInterval(() => { if (netDown) probe(); }, 60000);
       } else {
         clearInterval(downClock); downClock = null;
         if (probeTimer) { clearInterval(probeTimer); probeTimer = null; }
@@ -188,6 +198,72 @@
     window.addEventListener("offline", () => setNetDown(true, "📡 NO INTERNET — GYMCAST AUTO-RETRY"));
     window.addEventListener("online", () => setTimeout(probe, 2000));
 
+    // ---------- sync helpers ----------
+    function probeDuration(url) {
+      return new Promise((resolve) => {
+        const el = document.createElement("video");
+        el.preload = "metadata";
+        el.muted = true;
+        const to = setTimeout(() => { cleanup(); resolve(0); }, 8000);
+        function cleanup() { clearTimeout(to); el.removeAttribute("src"); try { el.load(); } catch (e) {} }
+        el.onloadedmetadata = () => { const d = el.duration; cleanup(); resolve(d); };
+        el.onerror = () => { cleanup(); resolve(0); };
+        el.src = url;
+      });
+    }
+
+    async function loadDurations(playlist) {
+      const out = {};
+      for (const v of playlist) {
+        if (isYTUrl(v.url)) return null;   // sync only pure MP4/R2 playlists
+        let cached = null;
+        try { cached = JSON.parse(localStorage.getItem("gc_dur_" + v.id) || "null"); } catch (e) {}
+        if (cached && cached.u === v.url && cached.d > 0) { out[v.id] = cached.d; continue; }
+        const d = await probeDuration(v.url);
+        if (!d || !isFinite(d) || d <= 0) return null;
+        out[v.id] = d;
+        try { localStorage.setItem("gc_dur_" + v.id, JSON.stringify({ u: v.url, d })); } catch (e) {}
+      }
+      return out;
+    }
+
+    async function setupSync(playlist) {
+      syncEnabled = false;
+      totalDur = 0; segStart = [];
+      if (!playlist.length) return;
+      const durs = await loadDurations(playlist);
+      if (!durs) return;
+      let acc = 0;
+      for (const v of playlist) { segStart.push(acc); acc += durs[v.id]; }
+      if (!(acc > 1)) return;
+      totalDur = acc;
+      syncEnabled = true;
+    }
+
+    function targetAt(ms) {
+      const pos = (ms / 1000) % totalDur;
+      let idx = 0;
+      for (let i = 0; i < segStart.length; i++) if (pos >= segStart[i]) idx = i;
+      return { idx, off: pos - segStart[idx] };
+    }
+
+    function align() {
+      if (!syncEnabled || paused || netDown || !htmlVid || !currentPlaylist.length) return;
+      if (htmlVid.readyState < 2 || htmlVid.seeking) return;
+      try {
+        const t = targetAt(correctedNow());
+        if (t.idx !== currentIndex) {
+          currentIndex = t.idx;
+          pendingSeek = t.off;
+          playCurrent();
+        } else {
+          const drift = htmlVid.currentTime - t.off;
+          if (Math.abs(drift) > 1.5) htmlVid.currentTime = t.off;
+        }
+      } catch (e) {}
+    }
+    setInterval(align, 5000);
+
     // Silent audio unlock: first touch/click/keypress anywhere unmutes. No prompt ever.
     function unlockAudio() {
       if (audioUnlocked) return;
@@ -229,18 +305,21 @@
           const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
           if (!res.ok) throw new Error("HTTP " + res.status);
+
+          // correct our clock against the server (keeps screens in sync even with bad device clocks)
+          const dh = res.headers.get("date");
+          if (dh) { const st = Date.parse(dh); if (!isNaN(st)) serverOffset = st - Date.now(); }
+
           const data = await res.json();
 
           if (netDown) setNetDown(false);
 
-          // Admin pressed "Restart": reload the page, keep the code
           if (data.reloadToken && localStorage.getItem(LS_TOK) !== data.reloadToken) {
             localStorage.setItem(LS_TOK, data.reloadToken);
             location.reload();
             return;
           }
 
-          // Admin pressed "Reset": forget everything, back to the code screen
           if (data.resetToken && localStorage.getItem(LS_RST) !== data.resetToken) {
             localStorage.setItem(LS_RST, data.resetToken);
             localStorage.removeItem(LS_CODE);
@@ -257,7 +336,14 @@
 
           if (incomingIds !== currentIds) {
             currentPlaylist = incomingPlaylist;
-            currentIndex = 0;
+            await setupSync(incomingPlaylist);
+            if (syncEnabled) {
+              const t = targetAt(correctedNow());
+              currentIndex = t.idx;
+              pendingSeek = t.off;
+            } else {
+              currentIndex = 0;
+            }
             playCurrent();
           } else if (currentPlaylist.length === 0 && player.style.display !== "flex") {
             showStandby();
@@ -305,7 +391,7 @@
 
       player.style.display = "block";
       const video = currentPlaylist[currentIndex];
-      const isYT = /youtube\.com|youtu\.be/i.test(video.url);
+      const isYT = isYTUrl(video.url);
 
       if (ytPlayer) { try { ytPlayer.destroy(); } catch(e){} ytPlayer = null; }
       if (htmlVid) { htmlVid.removeEventListener('ended', playNext); htmlVid.removeEventListener('error', onMediaError); htmlVid = null; }
@@ -323,7 +409,10 @@
               event.target.setVolume(vol);
               if (paused) event.target.pauseVideo();
             },
-            onStateChange: (event) => { if (event.data === YT.PlayerState.ENDED) playNext(); else if (event.data === YT.PlayerState.PLAYING && netDown) probe(); },
+            onStateChange: (event) => {
+              if (event.data === YT.PlayerState.ENDED) playNext();
+              else if (event.data === YT.PlayerState.PLAYING && netDown) probe();
+            },
             onError: () => { if (netDown) scheduleRetry(); else playNext(); }
           }
         });
@@ -337,6 +426,11 @@
         htmlVid.addEventListener('stalled', () => setBuffering(true));
         htmlVid.addEventListener('playing', () => setBuffering(false));
         htmlVid.addEventListener('canplay', () => { setBuffering(false); if (netDown) probe(); });
+
+        if (pendingSeek != null) {
+          const ps = pendingSeek; pendingSeek = null;
+          htmlVid.addEventListener('loadedmetadata', () => { try { htmlVid.currentTime = ps; } catch (e) {} }, { once: true });
+        }
 
         if (paused) {
           htmlVid.pause();
@@ -353,8 +447,8 @@
     }
 
     function onMediaError() {
-      if (netDown) scheduleRetry();   // wifi dead: retry the SAME video, don't skip through the playlist
-      else playNext();                // online but broken file: skip it (old behavior)
+      if (netDown) scheduleRetry();
+      else playNext();
     }
 
     function playNext() {
