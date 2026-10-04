@@ -105,7 +105,7 @@
     let pollTimer = null;
     let pollFn = null;
 
-    // ---------- schedule sync (rate-based phase lock) ----------
+    // ---------- schedule sync: glide, never shove ----------
     let serverOffset = 0;
     let bestRtt = null;
     let syncEnabled = false;
@@ -113,6 +113,8 @@
     let totalDur = 0;
     let pendingSeek = null;
     let midFixUsed = false;
+    let bufEpisodes = [];     // timestamps of real buffering banners
+    let looseUntil = 0;       // "wifi is struggling" window: smoothness over sync
 
     const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
     const correctedNow = () => Date.now() + serverOffset;
@@ -176,6 +178,15 @@
           netOverlay.style.display = "flex";
           netTitle.textContent = "⏳ SLOW NETWORK — BUFFERING";
           netSub.textContent = "the system is fine · loading video…";
+
+          // congestion awareness: 2 real stalls in 90s → relax sync for 2 min
+          const now = Date.now();
+          bufEpisodes.push(now);
+          bufEpisodes = bufEpisodes.filter(t => now - t < 90000);
+          if (bufEpisodes.length >= 2) {
+            looseUntil = now + 120000;
+            if (htmlVid) htmlVid.playbackRate = 1;
+          }
         }, 2500);
       } else {
         clearTimeout(bufferTimer);
@@ -258,8 +269,9 @@
       return { idx, off: pos - segStart[idx] };
     }
 
-    // Phase lock: glide into sync with playbackRate (no seeks!). Seek only for
-    // gross drift (>10s, once per video) or wrong video index.
+    // The glide: correct phase with playbackRate only. No seeks at boundaries.
+    // One emergency seek per video only beyond 20s (crash-scale gaps).
+    // In "loose" mode (wifi struggling): rate stays 1 — smoothness wins.
     function align() {
       if (!syncEnabled || paused || netDown || !htmlVid || !currentPlaylist.length) return;
       if (buffering || htmlVid.readyState < 2 || htmlVid.seeking) return;
@@ -276,10 +288,15 @@
 
         const drift = t.off - htmlVid.currentTime;   // >0 = behind schedule
 
-        if (!midFixUsed && Math.abs(drift) > 10) {
+        if (!midFixUsed && Math.abs(drift) > 20) {
           midFixUsed = true;
           htmlVid.currentTime = Math.max(0, t.off);
           htmlVid.playbackRate = 1;
+          return;
+        }
+
+        if (Date.now() < looseUntil) {
+          if (htmlVid.playbackRate !== 1) htmlVid.playbackRate = 1;
           return;
         }
 
@@ -337,7 +354,6 @@
           if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
           if (!res.ok) throw new Error("HTTP " + res.status);
 
-          // Ping-compensated clock: trust only the fastest ping we've ever seen.
           const dh = res.headers.get("date");
           if (dh) {
             const st = Date.parse(dh);
@@ -490,7 +506,8 @@
       else playNext();
     }
 
-    // Boundary snap: catch the schedule at the start of the next video (skip if <1s off).
+    // Boundary: start the next video NATURALLY (no seek → no synchronized load spikes
+    // on crowded wifi). The glide catches the phase afterwards, smoothly.
     function playNext() {
       if (currentPlaylist.length === 0 || paused) return;
       if (netDown) { scheduleRetry(); return; }
@@ -501,8 +518,10 @@
       if (syncEnabled) {
         try {
           const t = targetAt(correctedNow());
-          if (t.idx !== next && t.idx !== currentIndex) next = t.idx;
-          pendingSeek = (t.idx === next && t.off >= 1) ? t.off : null;
+          if (t.idx !== next && t.idx !== currentIndex) {
+            next = t.idx;
+            pendingSeek = t.off >= 1 ? t.off : null;
+          }
         } catch (e) {}
       }
 
