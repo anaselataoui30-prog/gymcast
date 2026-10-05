@@ -261,6 +261,21 @@ function unlockAudio() {
 window.addEventListener("pointerdown", unlockAudio);
 window.addEventListener("keydown", unlockAudio);
 
+/* Fullscreen: strict browsers grant it only after a user gesture (or in kiosk
+   mode). Try at boot; retry silently on every tap/click/key until it sticks. */
+let fsLocked = false;
+function goFullscreen() {
+  if (fsLocked) return;
+  try {
+    const p = document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen() : null;
+    if (p && p.then) p.then(() => { fsLocked = true; }).catch(() => {});
+    else if (document.fullscreenElement) fsLocked = true;
+  } catch (e) {}
+}
+document.addEventListener("fullscreenchange", () => { fsLocked = Boolean(document.fullscreenElement); });
+window.addEventListener("pointerdown", goFullscreen);
+window.addEventListener("keydown", goFullscreen);
+
 function getYTId(url) {
   try {
     const u = new URL(url);
@@ -375,7 +390,7 @@ function applyPause(p) {
 /* ---------- 7. Server polling ---------- */
 async function startPolling(code) {
   S.code = code;
-  try { document.documentElement.requestFullscreen?.(); } catch (e) {}
+  goFullscreen();
 
   async function poll() {
     const t0 = (window.performance && performance.now) ? performance.now() : now();
@@ -483,6 +498,7 @@ el.connect.addEventListener("click", async () => {
 
 /* ---------- 9. Boot ---------- */
 window.onYouTubeIframeAPIReady = function () {};
+goFullscreen();   // permissive TV browsers go full immediately; strict ones wait for the first tap
 const saved = localStorage.getItem(LS_CODE);
 if (saved) {
   el.activation.style.display = "none";
