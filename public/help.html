@@ -370,12 +370,52 @@
   </div>
 
   <script>
-    gcAuth.mount({
-      overlay: document.getElementById("loginOv"),
-      form: document.getElementById("loginForm"),
-      input: document.getElementById("pwIn"),
-      error: document.getElementById("loginErr"),
+    const loginOv = document.getElementById("loginOv");
+    const loginErr = document.getElementById("loginErr");
+    const loginForm = document.getElementById("loginForm");
+    const pwIn = document.getElementById("pwIn");
+
+    function showLogin(msg) {
+      if (msg) { loginErr.textContent = msg; loginErr.hidden = false; }
+      loginOv.style.display = "flex";
+    }
+    function hideLogin() {
+      loginOv.style.display = "none";
+      loginErr.hidden = true;
+    }
+
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginErr.hidden = true;
+      try {
+        const res = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: pwIn.value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+        gcAuth.setToken(data.token);
+        pwIn.value = "";
+        hideLogin();
+      } catch (err) {
+        showLogin(err.message);
+      }
     });
+
+    // Boot: if a token already exists, verify it; otherwise show the lock.
+    (async () => {
+      if (gcAuth.getToken()) {
+        try {
+          const res = await fetch("/api/admin/auth/check");
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.authed) { hideLogin(); return; }
+          gcAuth.clear();
+        } catch (e) { /* offline: fall through to login */ }
+      }
+      showLogin();
+      setTimeout(() => pwIn.focus(), 50);
+    })();
   </script>
 </body>
 </html>
