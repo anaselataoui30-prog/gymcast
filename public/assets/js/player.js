@@ -258,23 +258,30 @@ function unlockAudio() {
   if (S.htmlVid) { S.htmlVid.muted = false; S.htmlVid.volume = S.vol / 100; }
   if (S.ytPlayer && S.ytPlayer.unMute) { S.ytPlayer.unMute(); S.ytPlayer.setVolume(S.vol); }
 }
-window.addEventListener("pointerdown", unlockAudio);
-window.addEventListener("keydown", unlockAudio);
 
-/* Fullscreen: strict browsers grant it only after a user gesture (or in kiosk
-   mode). Try at boot; retry silently on every tap/click/key until it sticks. */
+/* Fullscreen: browsers require a user gesture. Try at boot (works on permissive
+   TV browsers); if blocked, trigger on the FIRST tap/click/key anywhere. Once
+   fullscreen, keep re-entering on interactions in case something exits it. */
 let fsLocked = false;
 function goFullscreen() {
   if (fsLocked) return;
   try {
     const p = document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen() : null;
-    if (p && p.then) p.then(() => { fsLocked = true; }).catch(() => {});
-    else if (document.fullscreenElement) fsLocked = true;
+    if (p && p.then) p.then(() => { fsLocked = true; hideFsHint(); }).catch(() => {});
+    else if (document.fullscreenElement) { fsLocked = true; hideFsHint(); }
   } catch (e) {}
 }
-document.addEventListener("fullscreenchange", () => { fsLocked = Boolean(document.fullscreenElement); });
-window.addEventListener("pointerdown", goFullscreen);
-window.addEventListener("keydown", goFullscreen);
+function hideFsHint() {
+  const hint = document.getElementById("fs-hint");
+  if (hint) hint.style.display = "none";
+}
+document.addEventListener("fullscreenchange", () => {
+  fsLocked = Boolean(document.fullscreenElement);
+  if (fsLocked) hideFsHint();
+});
+document.body.addEventListener("pointerdown", goFullscreen);
+document.body.addEventListener("keydown", goFullscreen);
+document.body.addEventListener("click", goFullscreen);
 
 function getYTId(url) {
   try {
@@ -498,10 +505,21 @@ el.connect.addEventListener("click", async () => {
 
 /* ---------- 9. Boot ---------- */
 window.onYouTubeIframeAPIReady = function () {};
-goFullscreen();   // permissive TV browsers go full immediately; strict ones wait for the first tap
+
+// Add fullscreen hint (disappears once fullscreen activates)
+const fsHint = document.createElement("div");
+fsHint.id = "fs-hint";
+fsHint.textContent = "Tap screen for fullscreen";
+fsHint.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:100;background:rgba(0,0,0,0.7);color:#ffb02e;padding:10px 20px;border-radius:8px;font-family:monospace;font-size:14px;pointer-events:none;";
+document.body.appendChild(fsHint);
+
+goFullscreen();   // permissive TV browsers go full immediately; strict ones wait for first tap
 const saved = localStorage.getItem(LS_CODE);
 if (saved) {
   el.activation.style.display = "none";
   startPolling(saved);
 }
+
+// Hide hint after 3 seconds if already fullscreen
+setTimeout(() => { if (document.fullscreenElement) hideFsHint(); }, 3000);
 })();
