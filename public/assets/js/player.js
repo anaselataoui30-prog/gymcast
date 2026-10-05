@@ -376,7 +376,7 @@ function playNext() {
 
 function showStandby() {
   el.player.style.display = "flex";
-  el.player.innerHTML = '<div id="standby-text">STANDBY</div>';
+  el.player.innerHTML = '<div id="standby-text">M-FITNESS ✓</div>';
   el.pausedBadge.style.display = "none";
 }
 
