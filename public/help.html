@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>دليل الاستخدام - GYMCAST</title>
+  <script src="/assets/js/auth.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #090b10; color: #e9edf5; line-height: 1.7; }
+    .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+    .login-box { background: #12161f; padding: 40px; border-radius: 8px; text-align: center; border-top: 5px solid #ffb02e; max-width: 400px; width: 90%; }
+    .login-box h2 { color: #ffb02e; margin-bottom: 20px; }
+    .login-box input { width: 100%; padding: 12px; background: #0c0f16; border: 2px solid #232a3a; color: #e9edf5; border-radius: 4px; margin-bottom: 15px; font-size: 16px; }
+    .login-box input:focus { border-color: #ffb02e; outline: none; }
+    .login-box button { width: 100%; padding: 12px; background: #ffb02e; color: #000; border: none; border-radius: 4px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .login-box button:hover { background: #ffc55e; }
+    .login-error { color: #ff4d3d; margin-top: 10px; min-height: 20px; }
+    
+    .container { max-width: 900px; margin: 0 auto; padding: 30px 20px; }
+    h1 { color: #ffb02e; font-size: 32px; margin-bottom: 10px; text-align: center; }
+    .subtitle { text-align: center; color: #8791a5; margin-bottom: 40px; font-size: 14px; }
+    
+    .back-link { display: inline-block; margin-bottom: 30px; color: #4cc3ff; text-decoration: none; font-size: 14px; }
+    .back-link:hover { color: #7dd8ff; }
+    
+    .section { background: #12161f; border: 1px solid #232a3a; border-radius: 8px; padding: 25px; margin-bottom: 20px; }
+    .section h2 { color: #ffb02e; font-size: 22px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+    .section h2 .icon { font-size: 28px; }
+    .section h3 { color: #4cc3ff; font-size: 18px; margin: 20px 0 10px 0; }
+    .section p { margin-bottom: 12px; color: #c8d0e0; }
+    .section ul { margin: 10px 0 15px 30px; }
+    .section li { margin-bottom: 8px; color: #c8d0e0; }
+    
+    .step { background: #0c0f16; border-right: 4px solid #ffb02e; padding: 15px; margin: 15px 0; border-radius: 4px; }
+    .step-num { display: inline-block; background: #ffb02e; color: #000; width: 28px; height: 28px; line-height: 28px; text-align: center; border-radius: 50%; font-weight: 700; margin-left: 10px; }
+    
+    .alert { background: #1a1f2e; border-right: 4px solid; padding: 15px; margin: 15px 0; border-radius: 4px; }
+    .alert.success { border-color: #3ddc84; }
+    .alert.warning { border-color: #ffb02e; }
+    .alert.danger { border-color: #ff4d3d; }
+    .alert strong { display: block; margin-bottom: 5px; font-size: 16px; }
+    
+    .tv-banner { display: inline-block; padding: 6px 12px; border-radius: 4px; font-family: monospace; font-size: 13px; font-weight: 700; margin: 3px; }
+    .banner-red { background: rgba(255,77,61,0.2); border: 1px solid #ff4d3d; color: #ff4d3d; }
+    .banner-amber { background: rgba(255,176,46,0.2); border: 1px solid #ffb02e; color: #ffb02e; }
+    .banner-green { background: rgba(61,220,132,0.2); border: 1px solid #3ddc84; color: #3ddc84; }
+    
+    .print-btn { position: fixed; bottom: 20px; left: 20px; background: #ffb02e; color: #000; padding: 12px 20px; border-radius: 4px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(255,176,46,0.3); z-index: 100; }
+    .print-btn:hover { background: #ffc55e; }
+    
+    @media print {
+      body { background: white; color: black; }
+      .container { max-width: 100%; }
+      .section { page-break-inside: avoid; border: 1px solid #ccc; }
+      .back-link, .print-btn, .login-overlay { display: none; }
+      h1, h2, h3 { color: black; }
+      .alert { border: 1px solid #999; background: #f5f5f5; }
+    }
+    
+    @media (max-width: 768px) {
+      .container { padding: 15px; }
+      .section { padding: 15px; }
+      h1 { font-size: 24px; }
+      .section h2 { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loginOv" class="login-overlay">
+    <div class="login-box">
+      <h2>دليل الاستخدام</h2>
+      <p style="color:#8791a5;margin-bottom:20px;">أدخل كلمة المرور للوصول</p>
+      <form id="loginForm">
+        <input id="pwIn" type="password" placeholder="كلمة المرور" autocomplete="current-password" required>
+        <button type="submit">دخول</button>
+        <div id="loginErr" class="login-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="container">
+    <a href="/admin.html" class="back-link">← العودة إلى لوحة التحكم</a>
+    
+    <h1>📺 دليل استخدام GYMCAST</h1>
+    <p class="subtitle">كل ما تحتاج معرفته لإدارة شاشات الصالة الرياضية</p>
+
+    <button onclick="window.print()" class="print-btn">🖨️ طباعة هذا الدليل</button>
+
+    <!-- SECTION 1: GETTING STARTED -->
+    <div class="section">
+      <h2><span class="icon">🚀</span> البداية السريعة</h2>
+      <p>مرحباً بك في GYMCAST! هذا النظام يسمح لك بالتحكم في شاشات الصالة الرياضية عن بعد.</p>
+      
+      <h3>المفاهيم الأساسية:</h3>
+      <ul>
+        <li><strong>كود الشاشة (4 أرقام):</strong> كل شاشة لها كود فريد (مثل 0001، 0022)</li>
+        <li><strong>المكتبة:</strong> حيث تحفظ الفيديوهات (من R2 أو YouTube)</li>
+        <li><strong>قائمة التشغيل:</strong> ترتيب الفيديوهات التي تريد عرضها</li>
+        <li><strong>الشاشات:</strong> الأجهزة التي تعرض المحتوى</li>
+      </ul>
+
+      <div class="alert success">
+        <strong>💡 نصيحة:</strong>
+        ابدأ بإضافة شاشة واحدة وجرّب النظام قبل إضافة جميع الشاشات.
+      </div>
+    </div>
+
+    <!-- SECTION 2: ADDING SCREENS -->
+    <div class="section">
+      <h2><span class="icon">📺</span> إضافة شاشة جديدة</h2>
+      
+      <div class="step">
+        <span class="step-num">1</span>
+        في لوحة التحكم، اضغط على <strong>الشاشات</strong> ثم <strong>إضافة شاشة</strong>
+      </div>
+      
+      <div class="step">
+        <span class="step-num">2</span>
+        أدخل <strong>كود من 4 أرقام</strong> (مثل 0023) واختر اسمًا للشاشة
+      </div>
+      
+      <div class="step">
+        <span class="step-num">3</span>
+        على الشاشة الحقيقية، افتح المتصفح واذهب إلى <code>gymcast.pages.dev</code>
+      </div>
+      
+      <div class="step">
+        <span class="step-num">4</span>
+        أدخل الكود الذي اخترته واضغط <strong>CONNECT SCREEN</strong>
+      </div>
+      
+      <div class="alert success">
+        <strong>✓ تم!</strong>
+        الشاشة الآن متصلة وجاهزة لاستقبال قوائم التشغيل.
+      </div>
+    </div>
+
+    <!-- SECTION 3: ADDING VIDEOS -->
+    <div class="section">
+      <h2><span class="icon">🎬</span> إضافة فيديوهات</h2>
+      
+      <h3>الطريقة 1: رفع فيديو من جهازك (R2)</h3>
+      <div class="step">
+        <span class="step-num">1</span>
+        في لوحة التحكم، اضغط على <strong>المكتبة</strong>
+      </div>
+      
+      <div class="step">
+        <span class="step-num">2</span>
+        اضغط <strong>رفع فيديو</strong> واختر ملف MP4 أو WebM
+      </div>
+      
+      <div class="step">
+        <span class="step-num">3</span>
+        انتظر حتى يكتمل الرفع (ستظهر رسالة "تم الحفظ في R2")
+      </div>
+      
+      <div class="alert warning">
+        <strong>⚠️ ملاحظة:</strong>
+        الفيديوهات المرفوعة تُحفظ في Cloudflare R2 (مساحة مجانية 10GB). لا تحذفها من المكتبة إذا كنت تستخدمها.
+      </div>
+
+      <h3>الطريقة 2: إضافة رابط YouTube</h3>
+      <div class="step">
+        <span class="step-num">1</span>
+        في <strong>المكتبة</strong>، اضغط <strong>إضافة رابط YouTube</strong>
+      </div>
+      
+      <div class="step">
+        <span class="step-num">2</span>
+        الصق رابط الفيديو من YouTube وأدخل عنوانًا
+      </div>
+      
+      <div class="alert warning">
+        <strong>⚠️ تحذير:</strong>
+        لا يمكن مزامنة شاشات متعددة عند استخدام YouTube. استخدم R2 للمزامنة الدقيقة.
+      </div>
+    </div>
+
+    <!-- SECTION 4: PLAYLISTS -->
+    <div class="section">
+      <h2><span class="icon">📋</span> إنشاء وإرسال قوائم التشغيل</h2>
+      
+      <div class="step">
+        <span class="step-num">1</span>
+        في <strong>المكتبة</strong>، اختر الفيديوهات التي تريد عرضها
+      </div>
+      
+      <div class="step">
+        <span class="step-num">2</span>
+        اضغط <strong>إرسال إلى شاشة</strong> واختر الشاشة (أو الشاشات) المستهدفة
+      </div>
+      
+      <div class="step">
+        <span class="step-num">3</span>
+        رتّب الفيديوهات بالسحب والإفلات إذا أردت تغيير الترتيب
+      </div>
+      
+      <div class="step">
+        <span class="step-num">4</span>
+        اضغط <strong>إرسال</strong> — ستبدأ الشاشة العرض خلال دقيقة واحدة
+      </div>
+
+      <div class="alert success">
+        <strong>🔄 التكرار التلقائي:</strong>
+        قائمة التشغيل تتكرر للأبد تلقائيًا. لا حاجة لإعادة إرسالها.
+      </div>
+    </div>
+
+    <!-- SECTION 5: REMOTE CONTROLS -->
+    <div class="section">
+      <h2><span class="icon">🎮</span> التحكم عن بعد</h2>
+      
+      <h3>من لوحة التحكم → الشاشات:</h3>
+      
+      <div class="step">
+        <strong>⏸️ إيقاف مؤقت (Pause):</strong>
+        يوقف الفيديو ويعرض شارة "PAUSED". اضغط مرة أخرى للاستئناف.
+      </div>
+      
+      <div class="step">
+        <strong>🔄 إعادة تشغيل (Restart):</strong>
+        يعيد تحميل الصفحة على الشاشة (مفيد إذا علقت).
+      </div>
+      
+      <div class="step">
+        <strong>🗑️ إعادة تعيين (Reset):</strong>
+        ينسي الشاشة الكود ويعيدها إلى شاشة إدخال الكود (استخدم بحذر!).
+      </div>
+
+      <div class="alert warning">
+        <strong>⏱️ وقت الاستجابة:</strong>
+        الأوامر تصل إلى الشاشة خلال دقيقة واحدة كحد أقصى (فترة الفحص 60 ثانية).
+      </div>
+    </div>
+
+    <!-- SECTION 6: TV BANNERS -->
+    <div class="section">
+      <h2><span class="icon">🚦</span> فهم شارات الشاشة</h2>
+      
+      <p>الشاشة تعرض شارات ملونة لتخبرك بحالتها:</p>
+      
+      <h3><span class="tv-banner banner-red">📡 NO INTERNET — AUTO-RETRY</span></h3>
+      <p>الإنترنت مقطوع. الشاشة تحاول إعادة الاتصال تلقائيًا. <strong>النظام بخير</strong> — المشكلة في الشبكة فقط. عندما يعود الإنترنت، ستعود الشاشة للعمل تلقائيًا.</p>
+      
+      <h3><span class="tv-banner banner-amber">⏳ SLOW NETWORK — BUFFERING</span></h3>
+      <p>الشبكة بطيئة جدًا. الشاشة تحاول تحميل الفيديو. انتظر قليلًا أو تحقق من قوة الواي فاي.</p>
+      
+      <h3><span class="tv-banner banner-green">✔ BACK ONLINE — RESUMING</span></h3>
+      <p>عاد الإنترنت! الشاشة تستأنف العرض تلقائيًا خلال ثوانٍ.</p>
+
+      <div class="alert success">
+        <strong>💡 الخلاصة:</strong>
+        إذا رأيت شارة حمراء أو صفراء، <strong>لا تفعل شيئًا</strong>. الشاشة ستعالج المشكلة بنفسها. إذا استمرت المشكلة أكثر من 5 دقائق، تحقق من الواي فاي.
+      </div>
+    </div>
+
+    <!-- SECTION 7: SYNC -->
+    <div class="section">
+      <h2><span class="icon">🎯</span> مزامنة الشاشات المتعددة</h2>
+      
+      <p>إذا كان لديك شاشتان أو أكثر تعرضان نفس قائمة التشغيل (نفس الكود)، سيتم مزامنتها تلقائيًا لتعرض نفس اللحظة بالضبط.</p>
+      
+      <h3>كيف تعمل المزامنة:</h3>
+      <ul>
+        <li>الشاشات تستخدم ساعة الخادم المرجعية</li>
+        <li>الشاشة المتأخرة تسرّع التشغيل قليلًا (1.5×) للحاق</li>
+        <li>الشاشة المتقدمة تُبطئ قليلًا (0.9×)</li>
+        <li>عند انتقال الفيديو، تنقر الشاشة المتأخرة للحاق فورًا</li>
+      </ul>
+
+      <div class="alert warning">
+        <strong>⚠️ قيود المزامنة:</strong>
+        <ul>
+          <li>تعمل فقط مع فيديوهات R2 (MP4/WebM)، وليس YouTube</li>
+          <li>بعض الشاشات القديمة قد لا تدعم تغيير السرعة — ستبقى متأخرة قليلًا</li>
+          <li>إذا كانت الشبكة ضعيفة جدًا، قد تفقد الشاشة المزامنة مؤقتًا</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 8: TROUBLESHOOTING -->
+    <div class="section">
+      <h2><span class="icon">🔧</span> حل المشاكل الشائعة</h2>
+      
+      <h3>الشاشة سوداء / لا تعرض شيئًا</h3>
+      <div class="step">
+        <span class="step-num">1</span>
+        في لوحة التحكم → الشاشات → اضغط <strong>Restart</strong> على الشاشة المتأثرة
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        انتظر دقيقة — يجب أن تعود الشاشة للعمل
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        إذا لم تعمل، أعد تحميل الصفحة على الشاشة يدويًا (F5 أو زر التحديث)
+      </div>
+
+      <h3>الشاشة تعرض "STANDBY"</h3>
+      <p>هذا يعني أن الشاشة <strong>لا تحتوي على قائمة تشغيل</strong>.</p>
+      <div class="step">
+        في <strong>المكتبة</strong> → اختر الفيديوهات → <strong>إرسال إلى شاشة</strong> → اختر الشاشة → <strong>إرسال</strong>
+      </div>
+
+      <h3>الشاشة لا تستجيب للأوامر (Pause/Restart/Reset)</h3>
+      <p>الشاشات تفحص الخادم كل 60 ثانية. انتظر حتى الدقيقة التالية. إذا استمرت المشكلة:</p>
+      <div class="step">
+        أعد تحميل الصفحة على الشاشة يدويًا
+      </div>
+
+      <h3>الشاشات غير متزامنة (واحدة متأخرة عن الأخرى)</h3>
+      <div class="step">
+        <span class="step-num">1</span>
+        تأكد أن جميع الفيديوهات من R2 (وليس YouTube)
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        في لوحة التحكم → <strong>إعدادات</strong> → تأكد أن <strong>فترة الفحص</strong> = 60 ثانية
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        أعد تشغيل الشاشات المتأخرة (Restart من لوحة التحكم)
+      </div>
+
+      <h3>الإنترنت مقطوع / الشاشة تعرض شارة حمراء</h3>
+      <div class="alert success">
+        <strong>لا تفعل شيئًا!</strong>
+        الشاشة ستحاول إعادة الاتصال تلقائيًا. عندما يعود الإنترنت، ستعود الشاشة للعمل فورًا. افحص فقط إذا استمرت المشكلة أكثر من 5 دقائق.
+      </div>
+    </div>
+
+    <!-- SECTION 9: BEST PRACTICES -->
+    <div class="section">
+      <h2><span class="icon">✨</span> أفضل الممارسات</h2>
+      
+      <ul>
+        <li><strong>استخدم فيديوهات R2:</strong> أسرع، أكثر موثوقية، تدعم المزامنة</li>
+        <li><strong>اضغط الفيديوهات:</strong> 720p أو 540p كافية لشاشات الصالة الرياضية — توفر مساحة وتسريع التحميل</li>
+        <li><strong>احتفظ بنسخة احتياطية:</strong> احفظ الفيديوهات الأصلية على جهازك في حال احتجت لإعادة الرفع</li>
+        <li><strong>لا تحذف فيديوهات R2:</strong> إذا حذفت فيديو من المكتبة، ستفقد الشاشات الوصول إليه</li>
+        <li><strong>اختبر على شاشة واحدة أولاً:</strong> قبل إرسال قائمة تشغيل لجميع الشاشات، جرّبها على واحدة</li>
+        <li><strong>راقب الشارات:</strong> الشارات الحمراء/الصفراء طبيعية أثناء انقطاع الإنترنت — لا داعي للذعر</li>
+      </ul>
+    </div>
+
+    <!-- SECTION 10: SUPPORT -->
+    <div class="section">
+      <h2><span class="icon">📞</span> الدعم الفني</h2>
+      
+      <p>إذا واجهت مشكلة لا تستطيع حلها:</p>
+      <ul>
+        <li>تحقق من حالة الإنترنت في الصالة</li>
+        <li>أعد تشغيل الراوتر إذا لزم الأمر</li>
+        <li>أعد تحميل الصفحة على الشاشة (F5)</li>
+        <li>استخدم <strong>Restart</strong> من لوحة التحكم</li>
+      </ul>
+
+      <div class="alert success">
+        <strong>💡 تذكير:</strong>
+        النظام مصمم ليعمل تلقائيًا. معظم المشاكل تحل نفسها خلال دقائق. إذا استمرت المشكلة أكثر من 10 دقائق، فقد تكون مشكلة في الشبكة أو في الشاشة نفسها.
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:40px;padding:20px;color:#8791a5;font-size:13px;">
+      <p>GYMCAST — نظام إدارة شاشات الصالة الرياضية</p>
+      <p>تم الإنشاء بعناية ❤️</p>
+    </div>
+  </div>
+
+  <script>
+    gcAuth.mount({
+      overlay: document.getElementById("loginOv"),
+      form: document.getElementById("loginForm"),
+      input: document.getElementById("pwIn"),
+      error: document.getElementById("loginErr"),
+    });
+  </script>
+</body>
+</html>
