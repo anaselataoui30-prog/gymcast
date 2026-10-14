@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST Fleet Monitor</title>
+<script src="/assets/js/auth.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:16px;}
+  h1{color:#ffb02e;font-size:20px;letter-spacing:2px;margin:0 0 4px;}
+  .sub{color:#8791a5;font-size:12px;margin-bottom:14px;}
+  .login-ov{position:fixed;inset:0;background:#000d;display:flex;align-items:center;justify-content:center;z-index:99;}
+  .login-card{width:min(360px,92vw);background:#12161f;border:1px solid #232a3a;border-top:4px solid #ffb02e;padding:26px;display:flex;flex-direction:column;gap:12px;border-radius:8px;text-align:center;}
+  .login-card input{padding:12px;background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;border-radius:6px;text-align:center;}
+  .login-card button{padding:12px;background:#ffb02e;border:0;color:#000;font-weight:800;border-radius:6px;cursor:pointer;}
+  .err{color:#ff4d3d;font-size:12px;min-height:16px;font-family:monospace;}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#12161f;border:1px solid #232a3a;padding:10px;border-radius:8px;margin-bottom:12px;}
+  .bar button,.bar select{background:#1b2130;border:1px solid #2a3245;color:#e9edf5;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;}
+  .bar button:hover{border-color:#ffb02e;}
+  .pill{padding:6px 12px;border-radius:999px;font-family:monospace;font-size:12px;font-weight:700;border:1px solid;}
+  .pill.ok{color:#3ddc84;border-color:#3ddc8466;background:#3ddc8412;}
+  .pill.bad{color:#ff4d3d;border-color:#ff4d3d66;background:#ff4d3d12;}
+  .pill.warn{color:#ffb02e;border-color:#ffb02e66;background:#ffb02e12;}
+  .pill.mut{color:#8791a5;border-color:#8791a566;background:#8791a512;}
+  .cards{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .card{flex:1;min-width:110px;background:#12161f;border:1px solid #232a3a;border-radius:8px;padding:12px;text-align:center;}
+  .card b{display:block;font-size:26px;font-family:monospace;}
+  .card span{color:#8791a5;font-size:11px;letter-spacing:1px;}
+  .group{margin-bottom:18px;}
+  .group h2{font-size:14px;letter-spacing:2px;margin:0 0 8px;font-family:monospace;}
+  table{width:100%;border-collapse:collapse;background:#12161f;border:1px solid #232a3a;border-radius:8px;overflow:hidden;font-size:13px;}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #1c2230;}
+  th{color:#8791a5;font-size:11px;letter-spacing:1px;font-family:monospace;}
+  tr:last-child td{border-bottom:0;}
+  tr.flash{animation:fl 2s;}
+  @keyframes fl{0%{background:#ffb02e22}100%{background:transparent}}
+  .code{font-family:monospace;font-weight:700;color:#ffb02e;}
+  .st-on{color:#3ddc84;font-weight:700;} .st-silent{color:#ff4d3d;font-weight:700;} .st-never{color:#8791a5;}
+  .flag{display:inline-block;margin-right:6px;padding:2px 8px;border-radius:4px;font-size:11px;font-family:monospace;border:1px solid;}
+  .f-pause{color:#ffb02e;border-color:#ffb02e66;} .f-standby{color:#8791a5;border-color:#8791a566;} .f-media{color:#ff4d3d;border-color:#ff4d3d66;}
+  #log{background:#12161f;border:1px solid #232a3a;border-radius:8px;padding:10px;font-family:monospace;font-size:12px;max-height:220px;overflow:auto;color:#93a0b5;line-height:1.6;}
+  #toasts{position:fixed;top:14px;right:14px;z-index:120;display:flex;flex-direction:column;gap:8px;}
+  .toast{background:#12161f;border:1px solid #232a3a;border-left:5px solid #ffb02e;padding:10px 14px;border-radius:6px;font-size:13px;box-shadow:0 8px 24px #000a;max-width:340px;}
+  .toast.on{border-left-color:#3ddc84;} .toast.off{border-left-color:#ff4d3d;}
+</style>
+</head>
+<body>
+
+<div id="loginOv" class="login-ov">
+  <form id="loginForm" class="login-card">
+    <b style="color:#ffb02e;letter-spacing:2px;">GYMCAST FLEET MONITOR</b>
+    <input id="pwIn" type="password" placeholder="Admin password" autocomplete="current-password">
+    <button type="submit">UNLOCK</button>
+    <p id="loginErr" class="err" hidden></p>
+  </form>
+</div>
+
+<h1>📡 GYMCAST FLEET MONITOR</h1>
+<div class="sub">Live status of every screen · auto-refresh 60s · SILENT = no check-in (screen off, wifi down, or tab closed) · media check on demand</div>
+
+<div class="bar">
+  <span id="netPill" class="pill mut">NET: ?</span>
+  <span id="clockPill" class="pill mut">--:--:--</span>
+  <span id="cdPill" class="pill mut">next: 60s</span>
+  <label class="pill mut">silent after
+    <select id="thresh">
+      <option value="10">10 min</option>
+      <option value="15" selected>15 min</option>
+      <option value="20">20 min</option>
+      <option value="30">30 min</option>
+      <option value="60">60 min</option>
+    </select>
+  </label>
+  <button id="btnNow">⟳ REFRESH NOW</button>
+  <button id="btnMedia">🎬 CHECK MEDIA</button>
+  <button id="btnNotify">🔔 ENABLE ALERTS</button>
+  <button id="btnCopy">📋 COPY REPORT</button>
+</div>
+
+<div class="cards">
+  <div class="card"><b id="cTotal">0</b><span>TOTAL</span></div>
+  <div class="card"><b id="cOn" style="color:#3ddc84">0</b><span>ON</span></div>
+  <div class="card"><b id="cSilent" style="color:#ff4d3d">0</b><span>SILENT / OFF</span></div>
+  <div class="card"><b id="cNever" style="color:#8791a5">0</b><span>NEVER SEEN</span></div>
+  <div class="card"><b id="cPause" style="color:#ffb02e">0</b><span>PAUSED</span></div>
+  <div class="card"><b id="cStandby" style="color:#8791a5">0</b><span>STANDBY</span></div>
+  <div class="card"><b id="cMedia" style="color:#ff4d3d">0</b><span>MEDIA BROKEN</span></div>
+</div>
+
+<div id="groups"></div>
+
+<h2 style="font-size:13px;letter-spacing:2px;color:#8791a5;font-family:monospace;">EVENT LOG</h2>
+<div id="log">Waiting for first refresh…</div>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+let D = null, prev = {}, mediaCache = {}, events = [], notifyOn = false;
+let countdown = 60, thresholdMin = 15, awayBoot = true;
+
+try { mediaCache = JSON.parse(sessionStorage.getItem("gc_fleet_media") || "{}"); } catch (e) {}
+try { prev = JSON.parse(localStorage.getItem("gc_fleet_last") || "{}"); } catch (e) {}
+
+/* ---------- login gate ---------- */
+const loginOv = $("#loginOv"), loginErr = $("#loginErr"), pwIn = $("#pwIn");
+function showLogin(msg){ if(msg){loginErr.textContent=msg;loginErr.hidden=false;} loginOv.style.display="flex"; }
+function hideLogin(){ loginOv.style.display="none"; loginErr.hidden=true; }
+$("#loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); loginErr.hidden = true;
+  try {
+    const res = await fetch("/api/admin/login", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ password: pwIn.value }) });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) throw new Error(data.error || ("HTTP "+res.status));
+    gcAuth.setToken(data.token); pwIn.value = ""; hideLogin(); start();
+  } catch (err) { showLogin(err.message); }
+});
+
+/* ---------- notifications ---------- */
+function toast(msg, kind){
+  const t = document.createElement("div");
+  t.className = "toast " + (kind || "");
+  t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => t.remove(), 7000);
+}
+function alertUser(title, body, kind){
+  toast(title + " — " + body, kind);
+  if (notifyOn && "Notification" in window && Notification.permission === "granted") {
+    try { new Notification(title, { body }); } catch (e) {}
+  }
+}
+$("#btnNotify").addEventListener("click", async () => {
+  if (!("Notification" in window)) { toast("This browser has no Notification API"); return; }
+  const p = await Notification.requestPermission();
+  if (p === "granted") { notifyOn = true; $("#btnNotify").textContent = "🔔 ALERTS ON"; toast("Desktop alerts enabled"); }
+  else toast("Permission denied — in-page toasts still work");
+});
+function logEvent(msg){
+  events.unshift(new Date().toLocaleTimeString("en-GB") + "  " + msg);
+  if (events.length > 60) events.pop();
+  $("#log").innerHTML = events.map(x => "<div>" + x + "</div>").join("");
+}
+
+/* ---------- data ---------- */
+function statusOf(tv, nowMs){
+  const ts = D.presence && D.presence[tv.code];
+  if (!ts) return { key: "never", age: null };
+  const age = Math.round((nowMs - ts) / 60000);
+  return { key: age <= thresholdMin ? "on" : "silent", age };
+}
+function mediaState(tv){
+  const ids = tv.playlistIds || [];
+  if (!ids.length) return { label: "—", broken: false };
+  let unchecked = false, broken = false;
+  for (const id of ids) {
+    if (mediaCache[id] === false) broken = true;
+    else if (mediaCache[id] === undefined) unchecked = true;
+  }
+  if (broken) return { label: "BROKEN", broken: true };
+  if (unchecked) return { label: "not checked", broken: false };
+  return { label: "OK", broken: false };
+}
+
+async function refresh(){
+  $("#netPill").className = "pill mut"; $("#netPill").textContent = "NET: …";
+  try {
+    const res = await fetch("/api/admin/dashboard");
+    if (res.status === 401) { gcAuth.clear(); showLogin("Session expired — log in"); return; }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    D = await res.json();
+    $("#netPill").className = "pill ok"; $("#netPill").textContent = "NET: OK (your connection)";
+    process();
+  } catch (e) {
+    $("#netPill").className = "pill bad"; $("#netPill").textContent = "NET: DOWN (your connection)";
+    logEvent("⚠ monitor could not reach the server: " + e.message);
+  }
+  countdown = 60;
+}
+
+function process(){
+  const nowMs = Date.now();
+  const tvs = (D.tvs || []).slice().sort((a,b) => a.code.localeCompare(b.code));
+  const next = {};
+  const rows = { silent: [], issues: [], healthy: [], never: [] };
+  let cOn=0, cSilent=0, cNever=0, cPause=0, cStandby=0, cMedia=0;
+
+  for (const tv of tvs) {
+    const st = statusOf(tv, nowMs);
+    next[tv.code] = st.key;
+    const paused = !!tv.paused;
+    const standby = !(tv.playlistIds || []).length;
+    const media = mediaState(tv);
+    if (paused) cPause++;
+    if (standby) cStandby++;
+    if (media.broken) cMedia++;
+
+    // transitions → notifications
+    if (prev[tv.code] && prev[tv.code] !== st.key) {
+      if (st.key === "on")  alertUser("🟢 " + tv.code + " " + (tv.name||""), "is ON / back online" + (awayBoot ? " (changed while page was closed)" : ""), "on");
+      if (st.key === "silent") alertUser("🔴 " + tv.code + " " + (tv.name||""), "went SILENT — off, wifi down, or tab closed" + (awayBoot ? " (changed while page was closed)" : ""), "off");
+      logEvent((st.key === "on" ? "🟢 " : "🔴 ") + tv.code + " " + (tv.name||"") + ": " + prev[tv.code].toUpperCase() + " → " + st.key.toUpperCase());
+    }
+
+    const row = { tv, st, paused, standby, media };
+    if (st.key === "never") { cNever++; rows.never.push(row); }
+    else if (st.key === "silent") { cSilent++; rows.silent.push(row); }
+    else if (paused || standby || media.broken) { cOn++; rows.issues.push(row); }
+    else { cOn++; rows.healthy.push(row); }
+  }
+
+  // screens deleted since last time
+  for (const code of Object.keys(prev)) {
+    if (!next[code] && prev[code]) logEvent("🗑 screen " + code + " no longer exists");
+  }
+  prev = next; awayBoot = false;
+  try { localStorage.setItem("gc_fleet_last", JSON.stringify(next)); } catch (e) {}
+
+  $("#cTotal").textContent = tvs.length;
+  $("#cOn").textContent = cOn;
+  $("#cSilent").textContent = cSilent;
+  $("#cNever").textContent = cNever;
+  $("#cPause").textContent = cPause;
+  $("#cStandby").textContent = cStandby;
+  $("#cMedia").textContent = cMedia;
+
+  const tr = (r) => `<tr>
+    <td class="code">${r.tv.code}</td>
+    <td>${r.tv.name || "—"}</td>
+    <td>${r.tv.gym || "—"}</td>
+    <td class="${r.st.key === "on" ? "st-on" : r.st.key === "silent" ? "st-silent" : "st-never"}">${r.st.key === "on" ? "● ON" : r.st.key === "silent" ? "● SILENT" : "○ NEVER"}</td>
+    <td>${r.st.age === null ? "never" : r.st.age + " min ago"}</td>
+    <td>${(r.tv.playlistIds || []).length} video(s)</td>
+    <td>${r.paused ? '<span class="flag f-pause">PAUSED</span>' : ""}${r.standby ? '<span class="flag f-standby">STANDBY</span>' : ""}${r.media.broken ? '<span class="flag f-media">MEDIA BROKEN</span>' : ""}</td>
+    <td>${r.media.label}</td>
+  </tr>`;
+  const head = `<tr><th>CODE</th><th>NAME</th><th>GYM</th><th>STATUS</th><th>LAST SEEN</th><th>PLAYLIST</th><th>FLAGS</th><th>MEDIA</th></tr>`;
+  const grp = (title, color, list) => list.length
+    ? `<div class="group"><h2 style="color:${color}">${title} (${list.length})</h2><table>${head}${list.map(tr).join("")}</table></div>` : "";
+
+  $("#groups").innerHTML =
+    grp("🔴 SILENT / OFF — no check-in (screen off, wifi down, or tab closed)", "#ff4d3d", rows.silent) +
+    grp("○ NEVER SEEN — activated but never checked in", "#8791a5", rows.never) +
+    grp("⚠ ON WITH FLAGS — paused / standby / broken media", "#ffb02e", rows.issues) +
+    grp("🟢 ON & HEALTHY", "#3ddc84", rows.healthy);
+
+  $("#clockPill").className = "pill mut";
+  $("#clockPill").textContent = "updated " + new Date().toLocaleTimeString("en-GB");
+}
+
+/* ---------- media deep check (on demand, cached per session) ---------- */
+$("#btnMedia").addEventListener("click", async () => {
+  if (!D) { toast("Refresh first"); return; }
+  const used = new Set();
+  (D.tvs || []).forEach(t => (t.playlistIds || []).forEach(id => used.add(id)));
+  const targets = (D.videos || []).filter(v => used.has(v.id) && mediaCache[v.id] === undefined);
+  if (!targets.length) { toast("All used videos already checked this session"); return; }
+  toast("Checking " + targets.length + " video(s)…");
+  for (const v of targets) {
+    try {
+      const h = await fetch(v.url, { method: "HEAD" });
+      const r = await fetch(v.url, { headers: { Range: "bytes=0-99" } });
+      mediaCache[v.id] = h.ok && (r.ok || r.status === 206);
+    } catch (e) { mediaCache[v.id] = false; }
+    if (mediaCache[v.id] === false) alertUser("🎬 MEDIA BROKEN", v.title, "off");
+  }
+  try { sessionStorage.setItem("gc_fleet_media", JSON.stringify(mediaCache)); } catch (e) {}
+  process();
+  toast("Media check complete");
+});
+
+/* ---------- report ---------- */
+$("#btnCopy").addEventListener("click", async () => {
+  if (!D) return;
+  const nowMs = Date.now();
+  const lines = ["GYMCAST FLEET REPORT", new Date().toISOString(),
+    "threshold=" + thresholdMin + "min | poll=" + ((D.settings && D.settings.pollSeconds) || "?") + "s",
+    "TOTAL " + $("#cTotal").textContent + " | ON " + $("#cOn").textContent + " | SILENT " + $("#cSilent").textContent +
+    " | NEVER " + $("#cNever").textContent + " | PAUSED " + $("#cPause").textContent + " | STANDBY " + $("#cStandby").textContent + " | MEDIA BROKEN " + $("#cMedia").textContent, ""];
+  for (const tv of (D.tvs || [])) {
+    const st = statusOf(tv, nowMs);
+    lines.push(tv.code + " | " + (tv.name||"-") + " | " + tv.gym + " | " + st.key.toUpperCase() +
+      (st.age !== null ? " (" + st.age + "m ago)" : "") +
+      (tv.paused ? " | PAUSED" : "") + (!(tv.playlistIds||[]).length ? " | STANDBY" : "") +
+      (mediaState(tv).broken ? " | MEDIA BROKEN" : ""));
+  }
+  lines.push("", "EVENTS:", ...events.slice(0, 20));
+  try { await navigator.clipboard.writeText(lines.join("\n")); toast("Report copied"); }
+  catch (e) { toast("Copy failed"); }
+});
+
+/* ---------- loops ---------- */
+let started = false;
+function start(){
+  if (started) return; started = true;
+  refresh();
+  setInterval(refresh, 60000);
+  setInterval(() => {
+    countdown--;
+    if (countdown < 0) countdown = 60;
+    $("#cdPill").textContent = "next: " + countdown + "s";
+  }, 1000);
+}
+$("#btnNow").addEventListener("click", refresh);
+$("#thresh").addEventListener("change", (e) => { thresholdMin = Number(e.target.value); if (D) process(); });
+
+/* boot: token? verify, else login */
+(async () => {
+  if (gcAuth.getToken()) {
+    try {
+      const res = await fetch("/api/admin/auth/check");
+      const data = await res.json().catch(()=>({}));
+      if (res.ok && data.authed) { hideLogin(); start(); return; }
+      gcAuth.clear();
+    } catch (e) {}
+  }
+  showLogin();
+  setTimeout(() => pwIn.focus(), 50);
+})();
+</script>
+</body>
+</html>
