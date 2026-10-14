@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST Fleet Monitor</title>
+<style>
+  body{margin:0;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:20px;}
+  h1{letter-spacing:2px;font-size:22px;color:#ffb02e;margin:0 0 6px;}
+  .sub{color:#8791a5;font-size:12px;margin-bottom:14px;line-height:1.5;}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#12161f;border:1px solid #232a3a;padding:12px;margin-bottom:12px;}
+  input,select{background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;padding:8px;}
+  input[type=password]{min-width:180px;} #search{min-width:140px;}
+  button{border:0;cursor:pointer;padding:8px 14px;font-weight:800;background:#ffb02e;color:#000;}
+  button.sec{background:#232a3a;color:#e9edf5;}
+  #summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+  .chip{padding:8px 12px;border-radius:6px;font-family:monospace;font-size:13px;font-weight:700;border:1px solid #232a3a;background:#12161f;}
+  .chip.g{border-color:#3ddc8466;color:#3ddc84;} .chip.r{border-color:#ff4d3d66;color:#ff4d3d;}
+  .chip.a{border-color:#ffb02e66;color:#ffb02e;} .chip.n{border-color:#8791a566;color:#8791a5;}
+  .chip.b{border-color:#4cc3ff66;color:#4cc3ff;}
+  #cost{color:#8791a5;font-size:12px;font-family:monospace;margin-bottom:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{color:#8791a5;text-align:left;padding:8px;border-bottom:1px solid #232a3a;font-family:monospace;font-size:11px;letter-spacing:1px;}
+  td{padding:8px;border-bottom:1px solid #1a2030;vertical-align:top;}
+  tr.live td:first-child{border-left:4px solid #3ddc84;} tr.silent td:first-child{border-left:4px solid #ff4d3d;}
+  tr.never td:first-child{border-left:4px solid #8791a5;}
+  tr.flash{animation:fl 2s;} @keyframes fl{0%{background:#ffb02e22}100%{background:transparent}}
+  .st{font-family:monospace;font-weight:800;} .st.g{color:#3ddc84;} .st.r{color:#ff4d3d;} .st.n{color:#8791a5;}
+  .tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-family:monospace;font-weight:700;margin-left:4px;}
+  .tag.a{background:#ffb02e22;color:#ffb02e;border:1px solid #ffb02e55;} .tag.r{background:#ff4d3d22;color:#ff4d3d;border:1px solid #ff4d3d55;}
+  .tag.b{background:#4cc3ff22;color:#4cc3ff;border:1px solid #4cc3ff55;}
+  #events{margin-top:16px;background:#12161f;border:1px solid #232a3a;padding:12px;max-height:260px;overflow:auto;font-family:monospace;font-size:12px;}
+  #events div{padding:3px 0;border-bottom:1px solid #1a2030;color:#93a0b5;}
+  #events b{color:#ffb02e;}
+  #offline{display:none;background:#ff4d3d22;border:1px solid #ff4d3d;color:#ff4d3d;padding:10px;margin-bottom:12px;font-family:monospace;font-weight:700;}
+</style>
+</head>
+<body>
+<h1>📡 GYMCAST FLEET MONITOR</h1>
+<div class="sub">
+  READ-ONLY board for all screens: live/silent/never, pause, playlist, video reachability, event log.
+  It never writes heartbeats, never changes anything. Problems sort to the top.
+</div>
+
+<div class="controls">
+  <input id="pw" type="password" placeholder="Admin password">
+  <button id="login">LOGIN</button>
+  <span style="color:#8791a5;font-size:12px;">refresh</span>
+  <select id="every">
+    <option value="60">1 min (watching)</option>
+    <option value="300" selected>5 min (all-day)</option>
+    <option value="600">10 min</option>
+  </select>
+  <label style="color:#8791a5;font-size:12px;"><input type="checkbox" id="auto" checked> auto</label>
+  <button id="now" class="sec">REFRESH NOW</button>
+  <button id="bell" class="sec">🔔 OFF</button>
+  <input id="search" placeholder="filter code/name">
+  <button id="copy" class="sec">COPY REPORT</button>
+</div>
+
+<div id="offline">MONITOR OFFLINE — cannot reach the API. Retrying on next sweep…</div>
+<div id="summary"></div>
+<div id="cost"></div>
+<table><thead><tr>
+  <th>STATUS</th><th>CODE</th><th>NAME</th><th>LAST SEEN</th><th>PLAYLIST</th><th>VIDEO</th><th>NOTES</th>
+</tr></thead><tbody id="rows"></tbody></table>
+<div id="events"><div><b>EVENT LOG</b> — transitions appear here (kept between refreshes)</div></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const EV_KEY = "gc_fleet_events";
+let TOKEN = sessionStorage.getItem("gc_fleet_tok") || "";
+let prev = {}, events = loadEv(), headCache = new Map(), timer = null, bellOn = false, lastRows = [];
+
+function loadEv(){ try { return JSON.parse(localStorage.getItem(EV_KEY) || "[]"); } catch(e){ return []; } }
+function saveEv(){ localStorage.setItem(EV_KEY, JSON.stringify(events.slice(0,200))); }
+function pushEv(msg){
+  events.unshift({ t: Date.now(), msg });
+  saveEv(); renderEvents();
+  if (bellOn && "Notification" in window && Notification.permission === "granted") new Notification("GYMCAST Fleet", { body: msg });
+}
+function renderEvents(){
+  $("#events").innerHTML = '<div><b>EVENT LOG</b></div>' + events.map(e =>
+    '<div>' + new Date(e.t).toLocaleString() + ' — ' + e.msg + '</div>').join("");
+}
+function ago(ms){
+  if (ms == null) return "never";
+  const s = Math.floor(ms/1000);
+  if (s < 60) return s + "s ago";
+  const m = Math.floor(s/60);
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m/60);
+  if (h < 24) return h + "h " + (m%60) + "m ago";
+  return Math.floor(h/24) + "d " + (h%24) + "h ago";
+}
+async function api(method, url, body){
+  const headers = {}; if (TOKEN) headers.authorization = "Bearer " + TOKEN;
+  if (body !== undefined) { headers["content-type"] = "application/json"; }
+  const res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+  let data = null; try { data = await res.json(); } catch(e){}
+  return { res, data };
+}
+async function pool(items, worker, n){
+  const out = new Array(items.length); let i = 0;
+  async function run(){ while (i < items.length){ const k = i++; out[k] = await worker(items[k]); } }
+  await Promise.all(Array.from({ length: Math.min(n, items.length || 1) }, run));
+  return out;
+}
+async function headOk(url){
+  const c = headCache.get(url);
+  if (c && Date.now() - c.t < 600000) return c.ok;
+  let ok = false;
+  try { ok = (await fetch(url, { method: "HEAD" })).ok; } catch(e){}
+  headCache.set(url, { ok, t: Date.now() });
+  return ok;
+}
+
+async function login(){
+  const r = await api("POST", "/api/admin/login", { password: $("#pw").value });
+  if (!r.res.ok || !r.data || !r.data.token) { alert("Login failed: " + ((r.data && r.data.error) || r.res.status)); return false; }
+  TOKEN = r.data.token; sessionStorage.setItem("gc_fleet_tok", TOKEN); $("#pw").value = "";
+  return true;
+}
+
+async function sweep(){
+  if (!TOKEN) return;
+  let dash;
+  try {
+    dash = await api("GET", "/api/admin/dashboard");
+    if (dash.res.status === 401) { TOKEN = ""; sessionStorage.removeItem("gc_fleet_tok"); alert("Session expired — login again."); return; }
+    if (!dash.res.ok) throw new Error("dash " + dash.res.status);
+    $("#offline").style.display = "none";
+  } catch(e) { $("#offline").style.display = "block"; schedule(); return; }
+
+  const D = dash.data;
+  const interval = (D.settings && D.settings.pollSeconds) || 600;
+  const presence = D.presence || {};
+  const liveGrace = interval * 2000 + 120000;
+
+  const states = await pool(D.tvs, async tv => {
+    try {
+      const st = await api("GET", "/api/tv/state?code=" + tv.code);   // NO hb — read-only, never fakes presence
+      return st.res.ok ? st.data : null;
+    } catch(e){ return null; }
+  }, 6);
+
+  const rows = [];
+  for (let i = 0; i < D.tvs.length; i++) {
+    const tv = D.tvs[i], st = states[i];
+    const ts = presence[tv.code] || null;
+    const age = ts ? Date.now() - ts : null;
+    let status = ts == null ? "never" : (age <= liveGrace ? "live" : "silent");
+    const pl = (st && st.playlist) || [];
+    const paused = st ? Boolean(st.paused) : null;
+    const hasYT = pl.some(v => /youtube\.com|youtu\.be/i.test(v.url));
+    let video = null;
+    if (pl.length) video = await headOk(pl[0].url);
+    rows.push({ code: tv.code, name: tv.name || "", status, ts, age, pl: pl.length, paused, hasYT, video,
+                titles: pl.slice(0,3).map(v => v.title).join(", ") });
+  }
+
+  // events (skip first sweep = baseline)
+  const first = Object.keys(prev).length === 0;
+  for (const r of rows) {
+    const p = prev[r.code];
+    if (!first && p) {
+      if (p.status !== r.status) pushEv(r.code + " " + r.name + ": " + p.status.toUpperCase() + " → " + r.status.toUpperCase() + (r.status === "silent" ? " (off or no internet)" : r.status === "live" ? " (back!)" : ""));
+      if (p.paused !== r.paused && r.paused != null) pushEv(r.code + " " + r.name + ": " + (r.paused ? "PAUSED by admin" : "resumed"));
+    }
+    prev[r.code] = { status: r.status, paused: r.paused };
+  }
+  if (first) renderEvents();
+
+  lastRows = rows;
+  render(rows, interval, D);
+  schedule();
+}
+
+function rank(r){
+  if (r.status === "silent") return 0;
+  if (r.status === "never") return 1;
+  if (r.video === false) return 2;
+  if (r.pl === 0) return 3;
+  if (r.paused) return 4;
+  return 5;
+}
+
+function render(rows, interval, D){
+  const q = $("#search").value.trim().toLowerCase();
+  const shown = rows.filter(r => !q || r.code.includes(q) || r.name.toLowerCase().includes(q));
+  shown.sort((a,b) => rank(a) - rank(b) || a.code.localeCompare(b.code));
+
+  const c = { live:0, silent:0, never:0, paused:0, nopl:0, badvid:0 };
+  rows.forEach(r => { c[r.status]++; if (r.paused) c.paused++; if (!r.pl) c.nopl++; if (r.video === false) c.badvid++; });
+
+  $("#summary").innerHTML =
+    '<span class="chip b">TOTAL ' + rows.length + '</span>' +
+    '<span class="chip g">LIVE ' + c.live + '</span>' +
+    '<span class="chip r">SILENT ' + c.silent + '</span>' +
+    '<span class="chip n">NEVER ' + c.never + '</span>' +
+    '<span class="chip a">PAUSED ' + c.paused + '</span>' +
+    '<span class="chip a">NO PLAYLIST ' + c.nopl + '</span>' +
+    (c.badvid ? '<span class="chip r">VIDEO BAD ' + c.badvid + '</span>' : '') +
+    '<span class="chip n">' + new Date().toLocaleTimeString() + '</span>';
+
+  const perTV = Math.round(86400 / interval);
+  const every = Number($("#every").value);
+  const monPerDay = Math.round(86400 / every) * (rows.length + 1);
+  $("#cost").textContent =
+    "TVs: " + rows.length + " × " + perTV + " req/day = " + (perTV * rows.length).toLocaleString() +
+    " · monitor (" + every + "s): ≈" + monPerDay.toLocaleString() + " req/day · free limit 100,000/day";
+
+  $("#rows").innerHTML = shown.map(r => {
+    const stTxt = r.status === "live" ? '<span class="st g">● LIVE</span>' : r.status === "silent" ? '<span class="st r">● SILENT</span>' : '<span class="st n">○ NEVER</span>';
+    let tags = "";
+    if (r.paused) tags += '<span class="tag a">PAUSED</span>';
+    if (!r.pl) tags += '<span class="tag a">NO PLAYLIST</span>';
+    if (r.video === false) tags += '<span class="tag r">VIDEO UNREACHABLE</span>';
+    if (r.hasYT) tags += '<span class="tag b">YT·no-sync</span>';
+    const note = r.status === "silent" && r.ts ? "off or no internet since " + new Date(r.ts).toLocaleTimeString() :
+                 r.status === "never" ? "never connected — enter its code on the TV once" : "";
+    const flash = (prev[r.code] && prev[r.code].__flash) ? ' class="flash"' : '';
+    return '<tr class="' + r.status + '">' +
+      '<td>' + stTxt + '</td><td style="font-family:monospace;font-weight:700;">' + r.code + '</td>' +
+      '<td>' + r.name + tags + '</td><td>' + ago(r.age) + '</td>' +
+      '<td>' + r.pl + (r.pl ? ' (' + r.titles + (r.pl > 3 ? '…' : '') + ')' : '') + '</td>' +
+      '<td>' + (r.video === true ? '✔' : r.video === false ? '✘' : '–') + '</td>' +
+      '<td style="color:#8791a5;">' + note + '</td></tr>';
+  }).join("");
+}
+
+function schedule(){
+  clearTimeout(timer);
+  if ($("#auto").checked) timer = setTimeout(sweep, Number($("#every").value) * 1000);
+}
+
+$("#login").addEventListener("click", async () => { if (await login()) sweep(); });
+$("#now").addEventListener("click", sweep);
+$("#every").addEventListener("change", schedule);
+$("#auto").addEventListener("change", schedule);
+$("#search").addEventListener("input", () => { if (lastRows.length) render(lastRows, 0, null); });
+$("#bell").addEventListener("click", async () => {
+  if (!("Notification" in window)) { alert("This browser has no desktop notifications."); return; }
+  if (!bellOn) {
+    const p = await Notification.requestPermission();
+    if (p === "granted") { bellOn = true; $("#bell").textContent = "🔔 ON"; }
+  } else { bellOn = false; $("#bell").textContent = "🔔 OFF"; }
+});
+$("#copy").addEventListener("click", async () => {
+  const lines = lastRows.map(r =>
+    r.code + " | " + r.status.toUpperCase() + " | seen " + ago(r.age) + " | playlist " + r.pl +
+    (r.paused ? " | PAUSED" : "") + (r.video === false ? " | VIDEO UNREACHABLE" : "") + (r.pl === 0 ? " | NO PLAYLIST" : ""));
+  const report = ["GYMCAST FLEET REPORT", new Date().toISOString(), $("#summary").textContent, "", lines.join("\n"), "", "EVENTS:", ...events.slice(0,30).map(e => new Date(e.t).toLocaleString() + " — " + e.msg)].join("\n");
+  try { await navigator.clipboard.writeText(report); $("#copy").textContent = "COPIED"; } catch(e){ $("#copy").textContent = "FAILED"; }
+  setTimeout(() => { $("#copy").textContent = "COPY REPORT"; }, 2000);
+});
+
+renderEvents();
+if (TOKEN) sweep();   // session remembered → straight to the board
+</script>
+</body>
+</html>
