@@ -52,6 +52,18 @@ export async function onRequest(context) {
     settings.autoReloadOnError = Boolean(body.autoReloadOnError);
   }
 
+  // ===== NEW: gym display labels (dictionary: stored value -> nice name) =====
+  if (body.gymNames && typeof body.gymNames === "object" && !Array.isArray(body.gymNames)) {
+    const clean = {};
+    for (const [k, v] of Object.entries(body.gymNames)) {
+      if (typeof v === "string" && v.trim()) {
+        clean[String(k).slice(0, 60)] = v.trim().slice(0, 60);
+      }
+    }
+    settings.gymNames = clean;
+  }
+  // ==========================================================================
+
   state.settings = settings;
 
   await writeState(context.env, state);
