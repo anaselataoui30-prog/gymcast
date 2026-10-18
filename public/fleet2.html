@@ -99,6 +99,7 @@
 const $ = (s) => document.querySelector(s);
 let D = null, prev = {}, mediaCache = {}, events = [], notifyOn = false;
 let countdown = 60, thresholdMin = 15, awayBoot = true;
+const gymLabel = (g) => ((D && D.settings && D.settings.gymNames) || {})[g] || (g == null || g === "" ? "—" : g);
 
 try { mediaCache = JSON.parse(sessionStorage.getItem("gc_fleet_media") || "{}"); } catch (e) {}
 try { prev = JSON.parse(localStorage.getItem("gc_fleet_last") || "{}"); } catch (e) {}
@@ -228,7 +229,7 @@ function process(){
   const tr = (r) => `<tr>
     <td class="code">${r.tv.code}</td>
     <td>${r.tv.name || "—"}</td>
-    <td>${r.tv.gym || "—"}</td>
+    <td>${gymLabel(r.tv.gym)}</td>
     <td class="${r.st.key === "on" ? "st-on" : r.st.key === "silent" ? "st-silent" : "st-never"}">${r.st.key === "on" ? "● ON" : r.st.key === "silent" ? "● SILENT" : "○ NEVER"}</td>
     <td>${r.st.age === null ? "never" : r.st.age + " min ago"}</td>
     <td>${(r.tv.playlistIds || []).length} video(s)</td>
@@ -280,7 +281,7 @@ $("#btnCopy").addEventListener("click", async () => {
     " | NEVER " + $("#cNever").textContent + " | PAUSED " + $("#cPause").textContent + " | STANDBY " + $("#cStandby").textContent + " | MEDIA BROKEN " + $("#cMedia").textContent, ""];
   for (const tv of (D.tvs || [])) {
     const st = statusOf(tv, nowMs);
-    lines.push(tv.code + " | " + (tv.name||"-") + " | " + tv.gym + " | " + st.key.toUpperCase() +
+    lines.push(tv.code + " | " + (tv.name||"-") + " | " + gymLabel(tv.gym) + " | " + st.key.toUpperCase() +
       (st.age !== null ? " (" + st.age + "m ago)" : "") +
       (tv.paused ? " | PAUSED" : "") + (!(tv.playlistIds||[]).length ? " | STANDBY" : "") +
       (mediaState(tv).broken ? " | MEDIA BROKEN" : ""));
