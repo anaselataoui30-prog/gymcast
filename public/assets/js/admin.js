@@ -25,7 +25,7 @@ function getActiveGyms() {
 }
 
 const ONLINE_MS = 15 * 60 * 1000;
-const gymLabel = (g) => ((D && D.settings && D.settings.gymNames) || {})[g] || (g == null || g === "" ? "—" : g);
+const gymLabel = (g) => ((D && D.settings && D.settings.gymNames) || {})[g] || GYM_NAMES[g] || (g == null || g === "" ? "—" : g);
 
 let D = {
   tvs: [],
@@ -155,7 +155,7 @@ function renderGymChips() {
     `<button class="gchip ${gymFilter === "ALL" ? "on" : ""}" data-gym="ALL">ALL</button>` +
     getActiveGyms().map(
       (gym) =>
-        `<button class="gchip gym-${gym} ${gymFilter === gym ? "on" : ""}" data-gym="${gym}">${gym} · ${count(gym)}</button>`
+        `<button class="gchip gym-${gym} ${gymFilter === gym ? "on" : ""}" data-gym="${esc(gym)}">${esc(gymLabel(gym))} · ${count(gym)}</button>`
     ).join("");
 }
 
@@ -182,7 +182,7 @@ function cardHtml(tv) {
       <div class="l2">
         <input class="tname" value="${esc(tv.name || "")}" data-code="${tv.code}" placeholder="Screen name" />
         <select class="tgym" data-code="${tv.code}">
-          ${getActiveGyms().map((gym) => `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`).join("")}
+         ${getActiveGyms().map((gym) => `<option value="${esc(gym)}" ${gym === tv.gym ? "selected" : ""}>${esc(gymLabel(gym))}</option>`).join("")}
         </select>
       </div>
       <div class="l3">
@@ -269,8 +269,8 @@ function renderBroadcast() {
         .map(
           ({ gym, tvs }) => `<div class="gymgroup">
             <div class="gymhead">
-              <span class="gymtag gym-${gym}">${gym}</span>
-              <span class="gname">${GYM_NAMES[gym]}</span>
+              <span class="gymtag gym-${gym}">${esc(gymLabel(gym))}</span>
+              <span class="gname">${esc(gym)}</span>
               <button class="gymall" data-gym="${gym}" type="button">toggle all</button>
             </div>
             <div class="chiprow">
@@ -430,7 +430,7 @@ document.addEventListener("DOMContentLoaded", () => {
           name: "gym",
           label: "Gym",
           type: "select",
-          options: getActiveGyms().map((gym) => ({ v: gym, l: `${gym}${GYM_NAMES[gym] ? " — " + GYM_NAMES[gym] : ""}` })),
+          options: getActiveGyms().map((gym) => ({ v: gym, l: `${esc(gymLabel(gym))}` })),
         },
       ],
     });
