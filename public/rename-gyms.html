@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST — Rename Gym Labels</title>
+<script src="/assets/js/auth.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:24px;max-width:560px;margin:0 auto;}
+  h1{color:#ffb02e;font-size:20px;letter-spacing:2px;margin:0 0 8px;}
+  .safe{background:#12241a;border:1px solid #3ddc8455;border-left:5px solid #3ddc84;padding:12px 14px;border-radius:6px;margin:14px 0;font-size:13px;color:#bfe8cf;line-height:1.6;}
+  .login-ov{position:fixed;inset:0;background:#000d;display:flex;align-items:center;justify-content:center;z-index:99;}
+  .login-card{width:min(340px,92vw);background:#12161f;border:1px solid #232a3a;border-top:4px solid #ffb02e;padding:24px;display:flex;flex-direction:column;gap:12px;border-radius:8px;text-align:center;}
+  .login-card input{padding:12px;background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;border-radius:6px;text-align:center;}
+  .login-card button{padding:12px;background:#ffb02e;border:0;color:#000;font-weight:800;border-radius:6px;cursor:pointer;}
+  .err{color:#ff4d3d;font-size:12px;min-height:16px;}
+  .row{display:flex;gap:10px;align-items:center;background:#12161f;border:1px solid #232a3a;border-radius:8px;padding:12px;margin-bottom:10px;}
+  .row .old{width:90px;font-family:monospace;font-weight:700;color:#8791a5;}
+  .row input{flex:1;padding:10px;background:#0c0f16;border:1px solid #232a3a;color:#ffb02e;border-radius:6px;font-weight:700;}
+  .row .n{width:80px;text-align:right;color:#8791a5;font-size:12px;font-family:monospace;}
+  button.go{width:100%;padding:14px;background:#3ddc84;border:0;color:#000;font-weight:800;border-radius:6px;cursor:pointer;font-size:15px;margin-top:6px;}
+  button.go:disabled{opacity:.4;cursor:not-allowed;}
+  #msg{margin-top:14px;font-family:monospace;font-size:13px;line-height:1.7;color:#93a0b5;white-space:pre-wrap;}
+</style>
+</head>
+<body>
+
+<div id="loginOv" class="login-ov">
+  <form id="loginForm" class="login-card">
+    <b style="color:#ffb02e;letter-spacing:2px;">GYM LABELS</b>
+    <input id="pwIn" type="password" placeholder="Admin password">
+    <button type="submit">UNLOCK</button>
+    <p id="loginErr" class="err" hidden></p>
+  </form>
+</div>
+
+<h1>🏷️ RENAME GYM LABELS</h1>
+<div class="safe">
+  ✅ Safe: this only changes the <b>label</b> (G1 → temara).<br>
+  Screen <b>codes never change</b>. Playlists, pause, playback — <b>untouched</b>.<br>
+  Your TVs keep playing the entire time.
+</div>
+
+<div id="list"></div>
+<button id="go" class="go" disabled>RENAME LABELS</button>
+<div id="msg"></div>
+
+<script>
+"use strict";
+const $=(s)=>document.querySelector(s);
+let D=null, changed=false;
+
+const loginOv=$("#loginOv"),loginErr=$("#loginErr"),pwIn=$("#pwIn");
+function showLogin(m){if(m){loginErr.textContent=m;loginErr.hidden=false;}loginOv.style.display="flex";}
+function hideLogin(){loginOv.style.display="none";loginErr.hidden=true;}
+$("#loginForm").addEventListener("submit",async(e)=>{
+  e.preventDefault();loginErr.hidden=true;
+  try{
+    const r=await fetch("/api/admin/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({password:pwIn.value})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||"HTTP "+r.status);
+    gcAuth.setToken(d.token);pwIn.value="";hideLogin();load();
+  }catch(err){showLogin(err.message);}
+});
+
+async function load(){
+  const r=await fetch("/api/admin/dashboard");
+  if(r.status===401){gcAuth.clear();showLogin("Login again");return;}
+  D=await r.json();
+  const groups={};
+  (D.tvs||[]).forEach(t=>{const g=t.gym||"(none)";groups[g]=(groups[g]||0)+1;});
+  let html="";
+  Object.keys(groups).sort().forEach(g=>{
+    html+=`<div class="row">
+      <span class="old">${g}</span>
+      <input data-gym="${g}" value="${g}" oninput="mark()">
+      <span class="n">${groups[g]} screen(s)</span>
+    </div>`;
+  });
+  $("#list").innerHTML=html;
+  $("#msg").textContent="";
+  $("#go").disabled=true;
+}
+function mark(){
+  changed=[...document.querySelectorAll("#list input")].some(i=>i.value.trim()!==i.dataset.gym && i.value.trim()!=="");
+  $("#go").disabled=!changed;
+}
+
+$("#go").addEventListener("click",async()=>{
+  const map={};
+  document.querySelectorAll("#list input").forEach(i=>{
+    const to=i.value.trim();
+    if(to && to!==i.dataset.gym) map[i.dataset.gym]=to;
+  });
+  const targets=(D.tvs||[]).filter(t=>map[t.gym||"(none)"]);
+  if(!targets.length){$("#msg").textContent="Nothing to rename.";return;}
+  $("#go").disabled=true;
+  $("#msg").textContent="Renaming "+targets.length+" screen label(s)… screens keep playing…\n";
+  let ok=0;
+  for(const t of targets){
+    const to=map[t.gym||"(none)"];
+    try{
+      const r=await fetch("/api/admin/tvs/"+t.code,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({gym:to})});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      ok++;
+    }catch(e){ $("#msg").textContent+="  ⚠ "+t.code+": "+e.message+"\n"; }
+    await new Promise(r=>setTimeout(r,120));
+  }
+  $("#msg").textContent+="\n✅ Done — "+ok+"/"+targets.length+" labels renamed.\nCodes unchanged. Playback unchanged. 🎉";
+  load();
+});
+
+(async()=>{
+  if(gcAuth.getToken()){
+    try{
+      const r=await fetch("/api/admin/auth/check");
+      const d=await r.json().catch(()=>({}));
+      if(r.ok&&d.authed){hideLogin();load();return;}
+      gcAuth.clear();
+    }catch(e){}
+  }
+  showLogin();setTimeout(()=>pwIn.focus(),50);
+})();
+</script>
+</body>
+</html>
