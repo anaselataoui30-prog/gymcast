@@ -7,18 +7,21 @@
 <script src="/assets/js/auth.js"></script>
 <style>
   *{box-sizing:border-box}
-  body{margin:0 auto;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:24px;max-width:600px;}
+  body{margin:0 auto;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:24px;max-width:640px;}
   h1{color:#ffb02e;font-size:20px;letter-spacing:2px;margin:0 0 8px;}
   .safe{background:#12241a;border:1px solid #3ddc8455;border-left:5px solid #3ddc84;padding:12px 14px;border-radius:6px;margin:14px 0;font-size:13px;color:#bfe8cf;line-height:1.7;}
+  .diag{padding:12px 14px;border-radius:6px;margin:14px 0;font-size:13px;line-height:1.7;display:none;}
+  .diag.ok{display:block;background:#12241a;border:1px solid #3ddc8455;color:#bfe8cf;}
+  .diag.bad{display:block;background:#2a1215;border:1px solid #ff4d3d66;color:#ffb3ab;}
   .login-ov{position:fixed;inset:0;background:#000d;display:flex;align-items:center;justify-content:center;z-index:99;}
   .login-card{width:min(340px,92vw);background:#12161f;border:1px solid #232a3a;border-top:4px solid #ffb02e;padding:24px;display:flex;flex-direction:column;gap:12px;border-radius:8px;text-align:center;}
   .login-card input{padding:12px;background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;border-radius:6px;text-align:center;}
   .login-card button{padding:12px;background:#ffb02e;border:0;color:#000;font-weight:800;border-radius:6px;cursor:pointer;}
   .err{color:#ff4d3d;font-size:12px;min-height:16px;}
   .row{display:flex;gap:10px;align-items:center;background:#12161f;border:1px solid #232a3a;border-radius:8px;padding:12px;margin-bottom:10px;}
-  .row .old{width:130px;font-family:monospace;font-size:12px;color:#8791a5;word-break:break-all;}
+  .row .old{width:150px;font-family:monospace;font-size:12px;color:#8791a5;word-break:break-all;}
   .row input{flex:1;padding:10px;background:#0c0f16;border:1px solid #232a3a;color:#ffb02e;border-radius:6px;font-weight:700;}
-  .row .n{width:90px;text-align:right;color:#8791a5;font-size:12px;font-family:monospace;}
+  .row .n{width:95px;text-align:right;color:#8791a5;font-size:12px;font-family:monospace;}
   button.go{width:100%;padding:14px;background:#3ddc84;border:0;color:#000;font-weight:800;border-radius:6px;cursor:pointer;font-size:15px;}
   #msg{margin-top:14px;font-family:monospace;font-size:13px;line-height:1.7;color:#93a0b5;white-space:pre-wrap;}
 </style>
@@ -36,12 +39,11 @@
 
 <h1>🏷️ GYM LABELS (display names)</h1>
 <div class="safe">
-  ✅ <b>100% safe:</b> this page sends <b>ZERO requests to your screens</b>.<br>
-  It saves <b>one settings key</b> (the label dictionary). Stored gym values, codes,
-  playlists, pause state and playback are <b>never touched</b>.<br>
-  Junk values (like <code>G4 = TEMARA</code> or <code>undefined</code>) can be given a
-  clean display name here — again, without touching any screen.
+  ✅ <b>100% safe:</b> sends <b>ZERO requests to your screens</b>. Codes, playlists, pause and playback are never touched.<br>
+  ✅ Saves the <b>whole settings object</b> (so poll interval / fallback / standby can never be wiped).<br>
+  ✅ <b>Self-verifies</b> after saving and tells you exactly what happened.
 </div>
+<div id="diag" class="diag"></div>
 
 <div id="list"></div>
 <button id="go" class="go">SAVE LABELS</button>
@@ -51,7 +53,7 @@
 "use strict";
 const $=(s)=>document.querySelector(s);
 const esc=(s)=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
-let D=null;
+let D=null, sentNames=null;
 
 const loginOv=$("#loginOv"),loginErr=$("#loginErr"),pwIn=$("#pwIn");
 function showLogin(m){if(m){loginErr.textContent=m;loginErr.hidden=false;}loginOv.style.display="flex";}
@@ -66,10 +68,30 @@ $("#loginForm").addEventListener("submit",async(e)=>{
   }catch(err){showLogin(err.message);}
 });
 
+function diag(kind, html){
+  const el=$("#diag");
+  el.className="diag "+kind;
+  el.innerHTML=html;
+}
+
 async function load(){
   const r=await fetch("/api/admin/dashboard");
   if(r.status===401){gcAuth.clear();showLogin("Login again");return;}
   D=await r.json();
+
+  // If we just saved, verify persistence
+  if(sentNames){
+    const saved=(D.settings&&D.settings.gymNames)||null;
+    if(saved && JSON.stringify(saved)===JSON.stringify(sentNames)){
+      diag("ok","✅ <b>Labels saved and verified on the server.</b><br>If the admin / fleet pages still show old names, their <i>display code</i> needs the gymLabel update — tell me and I'll send your <code>admin.js</code> and <code>fleet.html</code> fully patched (no find/replace).");
+    }else{
+      diag("bad","❌ <b>Your settings endpoint dropped the labels.</b><br>It only keeps known keys and ignored <code>gymNames</code>. Send me <code>functions/api/admin/settings.js</code> and I'll fix it with one line. Nothing was broken — your other settings are intact.");
+    }
+    sentNames=null;
+  }else{
+    diag("ok","Each row = one gym value stored on your screens. Type the name you want <b>displayed</b> for it. Saving changes labels only — screens stay exactly as they are.");
+  }
+
   const names=(D.settings&&D.settings.gymNames)||{};
   const groups={};
   (D.tvs||[]).forEach(t=>{const g=(t.gym==null?"":String(t.gym));groups[g]=(groups[g]||0)+1;});
@@ -92,13 +114,17 @@ $("#go").addEventListener("click",async()=>{
     const v=i.value.trim();
     if(v) names[i.dataset.g]=v;
   });
-  $("#msg").textContent="Saving label dictionary (1 request, settings only)…";
+  sentNames=names;
+  $("#msg").textContent="Saving (1 settings request, screens untouched)…";
   try{
-    const r=await fetch("/api/admin/settings",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({gymNames:names})});
+    // send the FULL settings object so nothing else can be wiped
+    const body=Object.assign({}, D.settings||{}, { gymNames: names });
+    const r=await fetch("/api/admin/settings",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
     if(!r.ok)throw new Error("HTTP "+r.status);
-    $("#msg").textContent="✅ Labels saved. Screens were NOT touched.\nAdmin & fleet now show the new names.";
-    load();
+    $("#msg").textContent="";
+    load();   // reload + verify
   }catch(e){
+    sentNames=null;
     $("#msg").textContent="❌ Save failed: "+e.message;
   }
 });
