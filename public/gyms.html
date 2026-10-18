@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GYMCAST — Rename Gyms Safely</title>
+<script src="/assets/js/auth.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#090b10;color:#e9edf5;font-family:system-ui,sans-serif;padding:20px;}
+  h1{color:#ffb02e;font-size:22px;letter-spacing:2px;margin:0 0 6px;}
+  .sub{color:#8791a5;font-size:13px;line-height:1.6;margin-bottom:16px;}
+  .safe{background:#12241a;border:1px solid #3ddc8455;border-left:5px solid #3ddc84;padding:12px 14px;border-radius:6px;margin-bottom:16px;font-size:13px;color:#bfe8cf;}
+  .login-ov{position:fixed;inset:0;background:#000d;display:flex;align-items:center;justify-content:center;z-index:99;}
+  .login-card{width:min(360px,92vw);background:#12161f;border:1px solid #232a3a;border-top:4px solid #ffb02e;padding:26px;display:flex;flex-direction:column;gap:12px;border-radius:8px;text-align:center;}
+  .login-card input{padding:12px;background:#0c0f16;border:1px solid #232a3a;color:#e9edf5;border-radius:6px;text-align:center;}
+  .login-card button{padding:12px;background:#ffb02e;border:0;color:#000;font-weight:800;border-radius:6px;cursor:pointer;}
+  .err{color:#ff4d3d;font-size:12px;min-height:16px;font-family:monospace;}
+  .panel{background:#12161f;border:1px solid #232a3a;border-radius:8px;padding:16px;margin-bottom:16px;}
+  .panel h2{font-size:14px;letter-spacing:2px;color:#4cc3ff;margin:0 0 12px;font-family:monospace;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #1c2230;}
+  th{color:#8791a5;font-size:11px;letter-spacing:1px;font-family:monospace;}
+  tr:last-child td{border-bottom:0;}
+  .gym-in{width:100%;padding:8px 10px;background:#0c0f16;border:1px solid #232a3a;color:#ffb02e;border-radius:6px;font-weight:700;}
+  .gym-in.changed{border-color:#ffb02e;background:#241a08;}
+  .count{color:#8791a5;font-family:monospace;font-size:12px;}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+  .bar button{background:#1b2130;border:1px solid #2a3245;color:#e9edf5;padding:10px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px;}
+  .bar button:hover{border-color:#ffb02e;}
+  .bar button.go{background:#3ddc84;border-color:#3ddc84;color:#000;}
+  .bar button:disabled{opacity:.4;cursor:not-allowed;}
+  #prog{height:8px;background:#1b2130;border-radius:99px;overflow:hidden;margin:10px 0;}
+  #prog i{display:block;height:100%;width:0%;background:#ffb02e;transition:width .2s;}
+  #log{background:#0c0f16;border:1px solid #232a3a;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;max-height:260px;overflow:auto;color:#93a0b5;line-height:1.6;}
+  .diff-old{color:#8791a5;text-decoration:line-through;}
+  .diff-new{color:#3ddc84;font-weight:700;}
+</style>
+</head>
+<body>
+
+<div id="loginOv" class="login-ov">
+  <form id="loginForm" class="login-card">
+    <b style="color:#ffb02e;letter-spacing:2px;">RENAME GYMS</b>
+    <input id="pwIn" type="password" placeholder="Admin password" autocomplete="current-password">
+    <button type="submit">UNLOCK</button>
+    <p id="loginErr" class="err" hidden></p>
+  </form>
+</div>
+
+<h1>🏷️ RENAME GYMS — SAFE MODE</h1>
+<div class="sub">Change the gym label on every screen at once (R1 → temara, R2 → ain atiq, …). Preview first, apply second, verify third.</div>
+
+<div class="safe">
+  ✅ <b>100% playback-safe.</b> The gym label is display-only — the TV player never reads it.
+  This tool only updates the label; it never touches playlists, pause state, or restart/reset tokens.
+  <b>Your screens keep playing the entire time.</b> Nothing is turned off, restarted, or reset.
+</div>
+
+<div class="panel">
+  <h2>1 · CURRENT GYMS (type a new name to rename)</h2>
+  <table id="gymTable"><tr><th>CURRENT GYM</th><th>NEW NAME</th><th>SCREENS</th></tr></table>
+</div>
+
+<div class="bar">
+  <button id="btnPreview">👁 PREVIEW CHANGES</button>
+  <button id="btnApply" class="go" disabled>✔ APPLY SAFELY</button>
+  <button id="btnReload">⟳ RELOAD DATA</button>
+</div>
+
+<div class="panel" id="diffPanel" hidden>
+  <h2>2 · PREVIEW — exactly what will change</h2>
+  <table id="diffTable"><tr><th>CODE</th><th>SCREEN</th><th>GYM</th></tr></table>
+</div>
+
+<div class="panel" id="runPanel" hidden>
+  <h2>3 · PROGRESS</h2>
+  <div id="prog"><i></i></div>
+  <div id="log"></div>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+let D = null, byCode = {}, planned = [];
+
+const loginOv=$("#loginOv"), loginErr=$("#loginErr"), pwIn=$("#pwIn");
+function showLogin(m){ if(m){loginErr.textContent=m;loginErr.hidden=false;} loginOv.style.display="flex"; }
+function hideLogin(){ loginOv.style.display="none"; loginErr.hidden=true; }
+$("#loginForm").addEventListener("submit", async (e)=>{
+  e.preventDefault(); loginErr.hidden=true;
+  try{
+    const res=await fetch("/api/admin/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({password:pwIn.value})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||("HTTP "+res.status));
+    gcAuth.setToken(data.token); pwIn.value=""; hideLogin(); load();
+  }catch(err){ showLogin(err.message); }
+});
+
+function log(msg){ const l=$("#log"); l.innerHTML += "<div>"+msg+"</div>"; l.scrollTop=l.scrollHeight; }
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+
+async function load(){
+  const res=await fetch("/api/admin/dashboard");
+  if(res.status===401){ gcAuth.clear(); showLogin("Session expired — log in"); return; }
+  D=await res.json();
+  byCode={}; (D.tvs||[]).forEach(t=>byCode[t.code]=t);
+  renderGyms();
+  $("#diffPanel").hidden=true; $("#runPanel").hidden=true; $("#btnApply").disabled=true; planned=[];
+}
+
+function renderGyms(){
+  const groups={};
+  (D.tvs||[]).forEach(t=>{ const g=(t.gym||"(none)"); (groups[g]=groups[g]||[]).push(t.code); });
+  const keys=Object.keys(groups).sort();
+  let html="<tr><th>CURRENT GYM</th><th>NEW NAME</th><th>SCREENS</th></tr>";
+  keys.forEach(g=>{
+    html += `<tr>
+      <td><b style="color:#ffb02e">${g}</b></td>
+      <td><input class="gym-in" data-gym="${g}" value="${g}" oninput="this.classList.toggle('changed', this.value!==this.dataset.gym)"></td>
+      <td class="count">${groups[g].length} screen(s)</td>
+    </tr>`;
+  });
+  $("#gymTable").innerHTML=html;
+}
+
+function computePlan(){
+  const map={};
+  document.querySelectorAll(".gym-in").forEach(inp=>{
+    const from=inp.dataset.gym, to=inp.value.trim();
+    if(to && to!==from) map[from]=to;
+  });
+  const changes=[];
+  (D.tvs||[]).forEach(t=>{
+    const g=(t.gym||"(none)");
+    if(map[g]) changes.push({code:t.code, name:t.name||"—", from:g, to:map[g]});
+  });
+  changes.sort((a,b)=>a.code.localeCompare(b.code));
+  return changes;
+}
+
+$("#btnPreview").addEventListener("click", ()=>{
+  planned=computePlan();
+  if(!planned.length){ $("#diffPanel").hidden=true; $("#btnApply").disabled=true; alert("No changes detected — type a NEW name different from the current one."); return; }
+  let html="<tr><th>CODE</th><th>SCREEN</th><th>GYM</th></tr>";
+  planned.forEach(c=>{ html += `<tr><td class="count">${c.code}</td><td>${c.name}</td><td><span class="diff-old">${c.from}</span> → <span class="diff-new">${c.to}</span></td></tr>`; });
+  $("#diffTable").innerHTML=html;
+  $("#diffPanel").hidden=false;
+  $("#btnApply").disabled=false;
+});
+
+$("#btnReload").addEventListener("click", load);
+
+$("#btnApply").addEventListener("click", async ()=>{
+  if(!planned.length) return;
+  $("#btnApply").disabled=true; $("#btnPreview").disabled=true;
+  $("#runPanel").hidden=false; $("#log").innerHTML="";
+  log("Starting safe rename of "+planned.length+" screen(s)… (playback is NOT affected)");
+  let ok=0; const bad=[];
+  for(let i=0;i<planned.length;i++){
+    const c=planned[i];
+    $("#prog i").style.width = Math.round(((i)/planned.length)*100)+"%";
+    try{
+      const res=await fetch("/api/admin/tvs/"+c.code, {method:"PATCH", headers:{"content-type":"application/json"}, body: JSON.stringify({gym:c.to})});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      ok++; log("✅ "+c.code+"  "+c.from+" → "+c.to);
+    }catch(e){ bad.push(c); log("❌ "+c.code+"  "+e.message); }
+    await sleep(150);
+  }
+  $("#prog i").style.width="100%";
+
+  // verify against fresh data
+  const vr=await fetch("/api/admin/dashboard");
+  if(vr.ok){
+    D=await vr.json(); byCode={}; (D.tvs||[]).forEach(t=>byCode[t.code]=t);
+    const wrong=planned.filter(c=>(byCode[c.code]||{}).gym!==c.to);
+    wrong.forEach(c=>log("⚠ verify failed: "+c.code+" still shows "+(byCode[c.code]||{}).gym));
+    log("");
+    log("DONE — updated "+(ok-wrong.length)+" / "+planned.length+" screens.");
+    if(wrong.length) log("Retry needed for: "+wrong.map(c=>c.code).join(", "));
+    else log("All gyms renamed. Screens kept playing the whole time. 🎉");
+  }
+  renderGyms();
+  $("#btnPreview").disabled=false;
+});
+
+(async ()=>{
+  if(gcAuth.getToken()){
+    try{
+      const res=await fetch("/api/admin/auth/check");
+      const data=await res.json().catch(()=>({}));
+      if(res.ok && data.authed){ hideLogin(); load(); return; }
+      gcAuth.clear();
+    }catch(e){}
+  }
+  showLogin(); setTimeout(()=>pwIn.focus(),50);
+})();
+</script>
+</body>
+</html>
