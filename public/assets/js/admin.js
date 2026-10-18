@@ -25,6 +25,7 @@ function getActiveGyms() {
 }
 
 const ONLINE_MS = 15 * 60 * 1000;
+const gymLabel = (g) => ((D && D.settings && D.settings.gymNames) || {})[g] || (g == null || g === "" ? "—" : g);
 
 let D = {
   tvs: [],
