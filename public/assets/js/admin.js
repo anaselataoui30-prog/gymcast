@@ -5,16 +5,13 @@
 // login (token) + screens + pause/play + playlists + uploads
 // ============================================================
 
-const GYM_SEED = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"];
+const GYM_SEED = ["G1", "G2", "G3", "G4"];
 
 const GYM_NAMES = {
   G1: "DOWNTOWN",
   G2: "RIVERSIDE",
   G3: "NORTHGATE",
   G4: "EASTSIDE",
-  G5: "HARBOR",
-  G6: "OLD MILL",
-  G7: "AIRPORT",
 };
 
 // Dynamic gym list: includes all seed gyms + any gym names found in actual data
