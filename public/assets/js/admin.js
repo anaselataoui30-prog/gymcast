@@ -5,7 +5,7 @@
 // login (token) + screens + pause/play + playlists + uploads
 // ============================================================
 
-const GYMS = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"];
+const GYM_SEED = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"];
 
 const GYM_NAMES = {
   G1: "DOWNTOWN",
@@ -16,6 +16,13 @@ const GYM_NAMES = {
   G6: "OLD MILL",
   G7: "AIRPORT",
 };
+
+// Dynamic gym list: includes all seed gyms + any gym names found in actual data
+function getActiveGyms() {
+  const gyms = new Set(GYM_SEED);
+  (D.tvs || []).forEach(tv => { if (tv.gym) gyms.add(tv.gym); });
+  return [...gyms].sort();
+}
 
 const ONLINE_MS = 15 * 60 * 1000;
 
@@ -145,7 +152,7 @@ function renderGymChips() {
 
   $("#gymChips").innerHTML =
     `<button class="gchip ${gymFilter === "ALL" ? "on" : ""}" data-gym="ALL">ALL</button>` +
-    GYMS.map(
+    getActiveGyms().map(
       (gym) =>
         `<button class="gchip gym-${gym} ${gymFilter === gym ? "on" : ""}" data-gym="${gym}">${gym} · ${count(gym)}</button>`
     ).join("");
@@ -174,7 +181,7 @@ function cardHtml(tv) {
       <div class="l2">
         <input class="tname" value="${esc(tv.name || "")}" data-code="${tv.code}" placeholder="Screen name" />
         <select class="tgym" data-code="${tv.code}">
-          ${GYMS.map((gym) => `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`).join("")}
+          ${getActiveGyms().map((gym) => `<option ${gym === tv.gym ? "selected" : ""}>${gym}</option>`).join("")}
         </select>
       </div>
       <div class="l3">
@@ -251,7 +258,7 @@ function renderBroadcast() {
         .join("")
     : '<div class="empty">Empty playlist</div>';
 
-  const groups = GYMS.map((gym) => ({
+  const groups = getActiveGyms().map((gym) => ({
     gym,
     tvs: D.tvs.filter((tv) => tv.gym === gym),
   })).filter((group) => group.tvs.length);
@@ -422,7 +429,7 @@ document.addEventListener("DOMContentLoaded", () => {
           name: "gym",
           label: "Gym",
           type: "select",
-          options: GYMS.map((gym) => ({ v: gym, l: `${gym} — ${GYM_NAMES[gym]}` })),
+          options: getActiveGyms().map((gym) => ({ v: gym, l: `${gym}${GYM_NAMES[gym] ? " — " + GYM_NAMES[gym] : ""}` })),
         },
       ],
     });
