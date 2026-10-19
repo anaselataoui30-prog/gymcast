@@ -169,7 +169,7 @@ function setBuffering(on) {
   } else {
     clearTimeout(S.bufferTimer);
     if (!S.buffering) return;
-    buffering = false;
+    S.buffering = false;    // ✅ FIXED
     if (!S.netDown) hideNet();
     updateAnim();
   }
