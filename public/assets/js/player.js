@@ -108,21 +108,45 @@ function showNet(mode, title, sub) {
 function hideNet() { el.net.style.display = "none"; }
 
 /* Branded waiting screens: your two animations, shown fullscreen while waiting. */
+/* Branded waiting screens — built INTO the player (works with ZERO network).
+   Same design as your two files: one screen, two states (text + color). */
+const ANIM_TEXTS  = { slow: "CONNEXION AU SYSTÈME...", offline: "PAS DE CONNEXION" };
+const ANIM_COLORS = { slow: "#ffb02e", offline: "#ff4d3d" };   // ← your two colors, tweak here
 const netAnim = document.createElement("div");
-netAnim.style.cssText = "position:fixed;inset:0;z-index:38;display:none;pointer-events:none;background:#000;";
-netAnim.innerHTML = '<iframe style="width:100%;height:100%;border:0;display:block;" title="status"></iframe>';
+netAnim.style.cssText = "position:fixed;inset:0;z-index:38;display:none;pointer-events:none;background:#000;align-items:center;justify-content:center;flex-direction:column;gap:22px;text-align:center;font-family:system-ui,sans-serif;";
+netAnim.innerHTML =
+  '<div class="ma-logo">MFITNESS&nbsp;<span>GYM</span></div>' +
+  '<div class="ma-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>' +
+  '<div class="ma-title"></div>' +
+  '<div class="ma-sub">RECONNEXION AUTOMATIQUE…</div>';
 document.body.appendChild(netAnim);
-const netAnimFrame = netAnim.querySelector("iframe");
+const maTitle = netAnim.querySelector(".ma-title");
+const maStyle = document.createElement("style");
+maStyle.textContent =
+  ".ma-logo{font-size:44px;font-weight:900;letter-spacing:6px;color:#e9edf5;}" +
+  ".ma-logo span{color:#ffb02e;}" +
+  ".ma-bars{display:flex;gap:6px;align-items:flex-end;height:46px;}" +
+  ".ma-bars i{width:8px;height:20%;background:#ffb02e;border-radius:3px;animation:mab 1.1s infinite ease-in-out;}" +
+  ".ma-bars i:nth-child(2){animation-delay:.12s}.ma-bars i:nth-child(3){animation-delay:.24s}" +
+  ".ma-bars i:nth-child(4){animation-delay:.36s}.ma-bars i:nth-child(5){animation-delay:.48s}" +
+  ".ma-bars i:nth-child(6){animation-delay:.6s}.ma-bars i:nth-child(7){animation-delay:.72s}" +
+  "@keyframes mab{0%,100%{height:18%}50%{height:100%}}" +
+  ".ma-title{font-family:monospace;font-size:26px;font-weight:800;letter-spacing:4px;animation:mablink 1.6s infinite;}" +
+  "@keyframes mablink{0%,100%{opacity:1}50%{opacity:.35}}" +
+  ".ma-sub{font-family:monospace;font-size:12px;letter-spacing:2px;color:#8791a5;}";
+document.head.appendChild(maStyle);
 let animCurrent = "";
 function showAnim(kind) {
-  const url = kind === "offline" ? "/assets/anim/offline.html" : "/assets/anim/slow.html";
-  netAnim.style.display = "block";
-  if (animCurrent !== url) { netAnimFrame.src = url; animCurrent = url; }
+  netAnim.style.display = "flex";
+  if (animCurrent !== kind) {
+    maTitle.textContent = ANIM_TEXTS[kind];
+    maTitle.style.color = ANIM_COLORS[kind];
+    animCurrent = kind;
+  }
 }
 function hideAnim() {
   if (netAnim.style.display === "none") return;
   netAnim.style.display = "none";
-  netAnimFrame.removeAttribute("src");
   animCurrent = "";
 }
 function updateAnim() {
