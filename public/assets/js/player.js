@@ -107,6 +107,30 @@ function showNet(mode, title, sub) {
 }
 function hideNet() { el.net.style.display = "none"; }
 
+/* Branded waiting screens: your two animations, shown fullscreen while waiting. */
+const netAnim = document.createElement("div");
+netAnim.style.cssText = "position:fixed;inset:0;z-index:38;display:none;pointer-events:none;background:#000;";
+netAnim.innerHTML = '<iframe style="width:100%;height:100%;border:0;display:block;" title="status"></iframe>';
+document.body.appendChild(netAnim);
+const netAnimFrame = netAnim.querySelector("iframe");
+let animCurrent = "";
+function showAnim(kind) {
+  const url = kind === "offline" ? "/assets/anim/offline.html" : "/assets/anim/slow.html";
+  netAnim.style.display = "block";
+  if (animCurrent !== url) { netAnimFrame.src = url; animCurrent = url; }
+}
+function hideAnim() {
+  if (netAnim.style.display === "none") return;
+  netAnim.style.display = "none";
+  netAnimFrame.removeAttribute("src");
+  animCurrent = "";
+}
+function updateAnim() {
+  if (S.netDown) showAnim("offline");
+  else if (S.buffering) showAnim("slow");
+  else hideAnim();
+}
+
 function setNetDown(on, reason) {
   if (on === S.netDown) { if (on && reason) el.netTitle.textContent = reason; return; }
   S.netDown = on;
@@ -120,13 +144,15 @@ function setNetDown(on, reason) {
     S.downClock = setInterval(() => {
       if (S.netDown) el.netSub.textContent = "the system is fine · waiting for network · " + fmtDur(now() - S.downSince);
     }, 1000);
-    if (!S.probeTimer) S.probeTimer = setInterval(() => { if (S.netDown) probe(); }, PROBE_INTERVAL);
+  if (!S.probeTimer) S.probeTimer = setInterval(() => { if (S.netDown) probe(); }, PROBE_INTERVAL);
+    updateAnim();
   } else {
     clearInterval(S.downClock); S.downClock = null;
     if (S.probeTimer) { clearInterval(S.probeTimer); S.probeTimer = null; }
     showNet("ok", "✔ BACK ONLINE — RESUMING", "");
     setTimeout(() => { if (!S.netDown && !S.buffering) hideNet(); }, 3000);
     if (!S.paused && mediaIsDead()) playCurrent();
+    updateAnim();
   }
 }
 
@@ -138,12 +164,14 @@ function setBuffering(on) {
       if (S.netDown) return;
       S.buffering = true;
       showNet("slow", "⏳ SLOW NETWORK — BUFFERING", "the system is fine · loading video…");
+      updateAnim();
     }, BUFFER_BANNER_DELAY);
   } else {
     clearTimeout(S.bufferTimer);
     if (!S.buffering) return;
-    S.buffering = false;
+    buffering = false;
     if (!S.netDown) hideNet();
+    updateAnim();
   }
 }
 
