@@ -107,19 +107,29 @@ function showNet(mode, title, sub) {
 }
 function hideNet() { el.net.style.display = "none"; }
 
-/* Branded waiting screens: your two animations, shown fullscreen while waiting. */
-/* Branded waiting screens — built INTO the player (works with ZERO network).
-   Same design as your two files: one screen, two states (text + color). */
+/* Branded waiting screens — YOUR animation files, cached while online so they
+   appear instantly even with ZERO network (injected from memory, no download).
+   Built-in fallback only if the cache is somehow empty. */
+const ANIM_URLS   = { slow: "/assets/anim/slow.html", offline: "/assets/anim/offline.html" };
 const ANIM_TEXTS  = { slow: "CONNEXION AU SYSTÈME...", offline: "PAS DE CONNEXION" };
-const ANIM_COLORS = { slow: "#ffb02e", offline: "#ff4d3d" };   // ← your two colors, tweak here
+const ANIM_COLORS = { slow: "#ffb02e", offline: "#ff4d3d" };
+const ANIM_CACHE_KEY = "gc_anim_cache";
+let animCache = {};
+try { animCache = JSON.parse(localStorage.getItem(ANIM_CACHE_KEY) || "{}"); } catch (e) { animCache = {}; }
+
 const netAnim = document.createElement("div");
-netAnim.style.cssText = "position:fixed;inset:0;z-index:38;display:none;pointer-events:none;background:#000;align-items:center;justify-content:center;flex-direction:column;gap:22px;text-align:center;font-family:system-ui,sans-serif;";
+netAnim.style.cssText = "position:fixed;inset:0;z-index:38;display:none;pointer-events:none;background:#000;";
 netAnim.innerHTML =
-  '<div class="ma-logo">MFITNESS&nbsp;<span>GYM</span></div>' +
-  '<div class="ma-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>' +
-  '<div class="ma-title"></div>' +
-  '<div class="ma-sub">RECONNEXION AUTOMATIQUE…</div>';
+  '<iframe style="width:100%;height:100%;border:0;display:none;" title="status"></iframe>' +
+  '<div class="ma-fb" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:22px;text-align:center;font-family:system-ui,sans-serif;">' +
+    '<div class="ma-logo">MFITNESS&nbsp;<span>GYM</span></div>' +
+    '<div class="ma-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>' +
+    '<div class="ma-title"></div>' +
+    '<div class="ma-sub">RECONNEXION AUTOMATIQUE…</div>' +
+  '</div>';
 document.body.appendChild(netAnim);
+const netAnimFrame = netAnim.querySelector("iframe");
+const maFb = netAnim.querySelector(".ma-fb");
 const maTitle = netAnim.querySelector(".ma-title");
 const maStyle = document.createElement("style");
 maStyle.textContent =
@@ -135,18 +145,48 @@ maStyle.textContent =
   "@keyframes mablink{0%,100%{opacity:1}50%{opacity:.35}}" +
   ".ma-sub{font-family:monospace;font-size:12px;letter-spacing:2px;color:#8791a5;}";
 document.head.appendChild(maStyle);
+
+/* Download your two files while the network is healthy; keep them in memory +
+   localStorage so they can be shown instantly even with the wifi dead. */
+function loadAnimCache() {
+  Object.keys(ANIM_URLS).forEach((kind) => {
+    fetch(ANIM_URLS[kind], { cache: "no-store" })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status))))
+      .then((html) => {
+        if (html && html.indexOf("<") !== -1) {
+          animCache[kind] = html;
+          try { localStorage.setItem(ANIM_CACHE_KEY, JSON.stringify(animCache)); } catch (e) {}
+        }
+      })
+      .catch(() => {});
+  });
+}
+loadAnimCache();
+
 let animCurrent = "";
 function showAnim(kind) {
-  netAnim.style.display = "flex";
-  if (animCurrent !== kind) {
+  netAnim.style.display = "block";
+  if (animCurrent === kind) return;
+  animCurrent = kind;
+  const html = animCache[kind];
+  if (html) {
+    maFb.style.display = "none";
+    netAnimFrame.style.display = "block";
+    netAnimFrame.srcdoc = html;          // YOUR file, injected from memory — no network needed
+  } else {
+    netAnimFrame.style.display = "none";
+    netAnimFrame.removeAttribute("srcdoc");
+    maFb.style.display = "flex";
     maTitle.textContent = ANIM_TEXTS[kind];
     maTitle.style.color = ANIM_COLORS[kind];
-    animCurrent = kind;
   }
 }
 function hideAnim() {
   if (netAnim.style.display === "none") return;
   netAnim.style.display = "none";
+  netAnimFrame.style.display = "none";
+  netAnimFrame.removeAttribute("srcdoc");
+  maFb.style.display = "none";
   animCurrent = "";
 }
 function updateAnim() {
@@ -177,6 +217,7 @@ function setNetDown(on, reason) {
     setTimeout(() => { if (!S.netDown && !S.buffering) hideNet(); }, 3000);
     if (!S.paused && mediaIsDead()) playCurrent();
     updateAnim();
+    loadAnimCache();   // refresh your waiting-screen files while we're online again
   }
 }
 
