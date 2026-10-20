@@ -1,6 +1,19 @@
 import { json } from "../../../../lib/core.js";
 
-const ALLOWED = ["mp4", "webm", "mov", "m4v", "mkv", "avi", "m3u8", "ts"];
+const ALLOWED = [
+  "mp4", "webm", "mov", "m4v", "mkv", "avi", "m3u8", "ts",
+  "jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg",
+];
+const IMAGE_MIME = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+};
 
 export async function onRequest(context) {
   if (context.request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -19,7 +32,7 @@ export async function onRequest(context) {
 
   const mpu = await env.BUCKET.createMultipartUpload(key, {
     httpMetadata: {
-      contentType: String(body.type || "video/mp4"),
+      contentType: String(body.type || IMAGE_MIME[ext] || "video/mp4"),
       cacheControl: "public, max-age=31536000, immutable",
     },
   });
