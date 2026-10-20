@@ -632,71 +632,127 @@ if (saved) {
 // Hide hint after 3 seconds if already fullscreen
 setTimeout(() => { if (document.fullscreenElement) hideFsHint(); }, 3000);
 
-/* ---------- 10. Keep the screen awake (Wake Lock + safe fallback) ----------
-   Client-side only: zero requests to screens, zero commands, nothing turned
-   off. Holds an OS "don't blank the display" lock while the page is visible,
-   so standby / offline-animation / incognito windows never sleep the panel.
-   Falls back to a hidden 1px looping video on browsers without Wake Lock;
-   every step is guarded, so an unsupported browser simply changes nothing. */
-let wakeSentinel = null;
-let fallbackRunning = false, fallbackTimer = null, fallbackTick = 0;
+/* ---------- 10. Keep the screen awake — THREE independent layers ----------
+   L1 navigator.wakeLock   (Chrome/Edge/Samsung/Chromium TVs)
+   L2 hidden 1s video FILE (strongest; universal playback; cached offline)
+   L3 hidden canvas video  (no file needed; saves Firefox/Safari/odd engines)
+   Global background layer on <body> — independent of the playback engine, so
+   it covers videos, YouTube links, pictures, standby, the offline/slow
+   animations AND the paused state, and survives every playCurrent() wipe.
+   NOT a gym video: never in library / playlists / admin / fleet check.
+   Every step guarded: missing file or unsupported browser = silent no-op,
+   playback can never regress. */
 
-function startFallback() {
-  if (fallbackRunning) return;
-  if (wakeSentinel && !wakeSentinel.released) return;     // a real lock is held already
+const SENTINEL_URL = "/assets/sys/sentinel.mp4";
+const SENTINEL_CACHE_KEY = "gc_sentinel_b64";
+let sentinelData = "";
+try { sentinelData = localStorage.getItem(SENTINEL_CACHE_KEY) || ""; } catch (e) { sentinelData = ""; }
+
+let wl = null;            // L1 handle
+let sentinelEl = null;    // L2 element
+let sentinelOk = false;   // L2 actually playing?
+let canvasVid = null;     // L3 element
+let canvasTimer = null, canvasTick = 0;
+
+/* ---- L2: the hidden video file (fetched once online, cached forever) ---- */
+function loadSentinel() {
+  fetch(SENTINEL_URL)
+    .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error("HTTP " + r.status))))
+    .then((buf) => {
+      const bytes = new Uint8Array(buf);
+      let bin = ""; const CH = 0x8000;
+      for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      sentinelData = "data:video/mp4;base64," + btoa(bin);
+      try { localStorage.setItem(SENTINEL_CACHE_KEY, sentinelData); } catch (e) {}
+      if (document.visibilityState === "visible") startSentinel();
+    })
+    .catch(() => {});   // offline first boot / no file -> L3 still guards
+}
+function startSentinel() {
+  if (!sentinelData) { startCanvas(); return; }      // no file -> fall through to L3
+  if (sentinelEl) { if (sentinelEl.paused) { const p = sentinelEl.play(); if (p && p.catch) p.catch(() => {}); } return; }
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = 16; canvas.height = 16;
-    const ctx = canvas.getContext("2d");
-    if (!ctx || typeof canvas.captureStream !== "function") return;
-    const stream = canvas.captureStream(0);              // manual frames = deterministic
+    const v = document.createElement("video");
+    v.id = "gc-sentinel";                            // NOT html-vid -> sync/mediaIsDead ignore it
+    v.src = sentinelData;
+    v.muted = true; v.defaultMuted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+    v.setAttribute("playsinline", ""); v.setAttribute("muted", ""); v.setAttribute("autoplay", ""); v.setAttribute("loop", "");
+    try { v.disablePictureInPicture = true; } catch (e) {}
+    try { v.disableRemotePlayback = true; } catch (e) {}
+    v.style.cssText = "position:fixed;left:-3px;top:-3px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;";
+    v.addEventListener("playing", () => { sentinelOk = true; stopCanvas(); });
+    v.addEventListener("timeupdate", () => { sentinelOk = true; stopCanvas(); });
+    v.onerror = () => { sentinelOk = false; startCanvas(); };
+    document.body.appendChild(v);                    // body, NOT #player -> wipes never kill it
+    sentinelEl = v;
+    const p = v.play(); if (p && p.catch) p.catch(() => {});
+    setTimeout(() => { if (!sentinelOk) startCanvas(); }, 4000);  // file didn't start -> L3
+  } catch (e) { startCanvas(); }
+}
+function stopSentinel() {
+  sentinelOk = false;
+  if (!sentinelEl) return;
+  try { sentinelEl.pause(); } catch (e) {}
+  try { sentinelEl.removeAttribute("src"); sentinelEl.load(); } catch (e) {}
+  try { sentinelEl.remove(); } catch (e) {}
+  sentinelEl = null;
+}
+
+/* ---- L3: canvas moving-pixel video (zero file, saves Firefox/Safari) ---- */
+function startCanvas() {
+  if (canvasVid || sentinelOk) return;
+  try {
+    const c = document.createElement("canvas"); c.width = 16; c.height = 16;
+    const ctx = c.getContext("2d");
+    if (!ctx || typeof c.captureStream !== "function") return;
+    const stream = c.captureStream(0);
     const track = stream.getVideoTracks && stream.getVideoTracks()[0];
     const v = document.createElement("video");
-    v.muted = true; v.volume = 0;
-    v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
-    v.style.cssText = "position:fixed;left:-2px;top:-2px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;";
+    v.muted = true; v.volume = 0; v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
+    v.style.cssText = "position:fixed;left:-3px;top:-3px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;";
     v.srcObject = stream;
     document.body.appendChild(v);
     const p = v.play(); if (p && p.catch) p.catch(() => {});
-    fallbackTimer = setInterval(() => {
-      try {
-        ctx.fillStyle = (fallbackTick++ % 2) ? "#000" : "#010101";
-        ctx.fillRect(0, 0, 16, 16);
-        if (track && track.requestFrame) track.requestFrame();
-      } catch (e) {}
+    canvasVid = v;
+    canvasTimer = setInterval(() => {
+      try { ctx.fillStyle = (canvasTick++ % 2) ? "#000" : "#010101"; ctx.fillRect(0, 0, 16, 16);
+            if (track && track.requestFrame) track.requestFrame(); } catch (e) {}
     }, 2000);
-    fallbackRunning = true;
   } catch (e) {}
 }
-function stopFallback() {
-  if (!fallbackRunning) return;
-  clearInterval(fallbackTimer); fallbackTimer = null;
-  fallbackRunning = false;
+function stopCanvas() {
+  if (!canvasVid) return;
+  clearInterval(canvasTimer); canvasTimer = null;
+  try { canvasVid.pause(); } catch (e) {}
+  try { canvasVid.removeAttribute("srcObject"); canvasVid.load(); } catch (e) {}
+  try { canvasVid.remove(); } catch (e) {}
+  canvasVid = null;
 }
 
-async function ensureAwake() {
+/* ---- L1: the real Wake Lock API ---- */
+async function tryWakeLock() {
+  if (wl && !wl.released) return;
+  if (!("wakeLock" in navigator) || !navigator.wakeLock) return;
+  try {
+    wl = await navigator.wakeLock.request("screen");
+    wl.addEventListener("release", () => { wl = null; });
+  } catch (e) { wl = null; }
+}
+function releaseWakeLock() { try { if (wl && !wl.released) wl.release(); } catch (e) {} wl = null; }
+
+/* ---- the conductor: hold all available layers while visible ---- */
+function ensureAwake() {
   if (document.visibilityState !== "visible") return;
-  if (wakeSentinel && !wakeSentinel.released) return;     // already holding
-  if ("wakeLock" in navigator && navigator.wakeLock) {
-    try {
-      wakeSentinel = await navigator.wakeLock.request("screen");
-      wakeSentinel.addEventListener("release", () => { wakeSentinel = null; });
-      stopFallback();                                     // real lock won → drop fallback
-      return;
-    } catch (e) { /* not allowed / transient → try fallback */ }
-  }
-  startFallback();
+  tryWakeLock();                 // L1
+  startSentinel();               // L2 (auto-drops to L3 if no file / fails)
 }
-function releaseAwake() {
-  try { if (wakeSentinel && !wakeSentinel.released) wakeSentinel.release(); } catch (e) {}
-  wakeSentinel = null;
-  stopFallback();
-}
+function releaseAwake() { releaseWakeLock(); stopSentinel(); stopCanvas(); }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") ensureAwake();
-  else releaseAwake();
+  if (document.visibilityState === "visible") ensureAwake(); else releaseAwake();
 });
 setInterval(() => { if (document.visibilityState === "visible") ensureAwake(); }, 25000);
+
+loadSentinel();
 ensureAwake();
 })();
