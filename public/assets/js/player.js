@@ -74,6 +74,8 @@ const S = {
 
 /* ---------- 3. Small utils ---------- */
 const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
+const isImageUrl = (u) => /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(u);
+const IMAGE_DURATION = 15;  // seconds to show each image
 const now = () => Date.now();
 const correctedNow = () => now() + S.serverOffset;
 const fmtDur = (ms) => {
@@ -393,6 +395,20 @@ function playCurrent() {
 
   if (S.ytPlayer) { try { S.ytPlayer.destroy(); } catch (e) {} S.ytPlayer = null; }
   if (S.htmlVid) { S.htmlVid.removeEventListener("ended", playNext); S.htmlVid.removeEventListener("error", onMediaError); S.htmlVid = null; }
+
+  if (isImageUrl(video.url)) {
+    // IMAGE DISPLAY: show fullscreen for IMAGE_DURATION seconds, then advance
+    el.player.innerHTML = `<img id="html-img" src="${video.url}" style="width:100%;height:100%;object-fit:contain;background:#000;" alt="">`;
+    const img = document.getElementById("html-img");
+    img.onerror = () => { console.error("Image load failed:", video.url); playNext(); };
+    if (S.paused) return;  // respect pause state
+    setTimeout(() => {
+      if (!S.paused && S.playlist.length && S.index === S.playlist.findIndex(v => v.url === video.url)) {
+        playNext();
+      }
+    }, IMAGE_DURATION * 1000);
+    return;
+  }
 
   if (isYTUrl(video.url)) {
     el.player.innerHTML = '<div id="yt-player-container" style="width:100%;height:100%;"></div>';
