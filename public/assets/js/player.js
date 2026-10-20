@@ -631,4 +631,72 @@ if (saved) {
 
 // Hide hint after 3 seconds if already fullscreen
 setTimeout(() => { if (document.fullscreenElement) hideFsHint(); }, 3000);
+
+/* ---------- 10. Keep the screen awake (Wake Lock + safe fallback) ----------
+   Client-side only: zero requests to screens, zero commands, nothing turned
+   off. Holds an OS "don't blank the display" lock while the page is visible,
+   so standby / offline-animation / incognito windows never sleep the panel.
+   Falls back to a hidden 1px looping video on browsers without Wake Lock;
+   every step is guarded, so an unsupported browser simply changes nothing. */
+let wakeSentinel = null;
+let fallbackRunning = false, fallbackTimer = null, fallbackTick = 0;
+
+function startFallback() {
+  if (fallbackRunning) return;
+  if (wakeSentinel && !wakeSentinel.released) return;     // a real lock is held already
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 16; canvas.height = 16;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || typeof canvas.captureStream !== "function") return;
+    const stream = canvas.captureStream(0);              // manual frames = deterministic
+    const track = stream.getVideoTracks && stream.getVideoTracks()[0];
+    const v = document.createElement("video");
+    v.muted = true; v.volume = 0;
+    v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
+    v.style.cssText = "position:fixed;left:-2px;top:-2px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;";
+    v.srcObject = stream;
+    document.body.appendChild(v);
+    const p = v.play(); if (p && p.catch) p.catch(() => {});
+    fallbackTimer = setInterval(() => {
+      try {
+        ctx.fillStyle = (fallbackTick++ % 2) ? "#000" : "#010101";
+        ctx.fillRect(0, 0, 16, 16);
+        if (track && track.requestFrame) track.requestFrame();
+      } catch (e) {}
+    }, 2000);
+    fallbackRunning = true;
+  } catch (e) {}
+}
+function stopFallback() {
+  if (!fallbackRunning) return;
+  clearInterval(fallbackTimer); fallbackTimer = null;
+  fallbackRunning = false;
+}
+
+async function ensureAwake() {
+  if (document.visibilityState !== "visible") return;
+  if (wakeSentinel && !wakeSentinel.released) return;     // already holding
+  if ("wakeLock" in navigator && navigator.wakeLock) {
+    try {
+      wakeSentinel = await navigator.wakeLock.request("screen");
+      wakeSentinel.addEventListener("release", () => { wakeSentinel = null; });
+      stopFallback();                                     // real lock won → drop fallback
+      return;
+    } catch (e) { /* not allowed / transient → try fallback */ }
+  }
+  startFallback();
+}
+function releaseAwake() {
+  try { if (wakeSentinel && !wakeSentinel.released) wakeSentinel.release(); } catch (e) {}
+  wakeSentinel = null;
+  stopFallback();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") ensureAwake();
+  else releaseAwake();
+});
+setInterval(() => { if (document.visibilityState === "visible") ensureAwake(); }, 25000);
+ensureAwake();
 })();
