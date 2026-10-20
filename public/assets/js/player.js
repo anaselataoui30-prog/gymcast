@@ -374,9 +374,21 @@ document.addEventListener("fullscreenchange", () => {
   fsLocked = Boolean(document.fullscreenElement);
   if (fsLocked) hideFsHint();
 });
-document.body.addEventListener("pointerdown", goFullscreen);
-document.body.addEventListener("keydown", goFullscreen);
-document.body.addEventListener("click", goFullscreen);
+/* Gesture-path guard: on laptops/DevTools, Chrome often reports "no active
+   gesture" for clicks that don't really count for fullscreen — skipping the
+   call there stops the wall of red "needs a user gesture" logs. The BOOT call
+   (goFullscreen at load / in startPolling) is left untouched, so permissive TV
+   browsers still go fullscreen with zero taps, exactly as you required. Browsers
+   without navigator.userActivation (most TVs/phones) fall straight through and
+   behave exactly as before. */
+function goFullscreenOnGesture() {
+  if (fsLocked) return;
+  if (navigator.userActivation && !navigator.userActivation.isActive) return;
+  goFullscreen();
+}
+document.body.addEventListener("pointerdown", goFullscreenOnGesture);
+document.body.addEventListener("keydown", goFullscreenOnGesture);
+document.body.addEventListener("click", goFullscreenOnGesture);
 
 function getYTId(url) {
   try {
