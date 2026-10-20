@@ -95,9 +95,11 @@ function timeAgo(timestamp) {
 }
 
 function badgeFor(video) {
+  const isImg = /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(video.url);
   if (video.source === "r2" || (D.mediaBaseUrl && video.url.startsWith(D.mediaBaseUrl))) {
-    return { cls: "r2", label: "R2" };
+    return { cls: isImg ? "img" : "r2", label: isImg ? "IMG" : "R2" };
   }
+  if (isImg) return { cls: "img", label: "IMG" };
   if (/(?:youtube\.com|youtu\.be)/i.test(video.url)) return { cls: "yt", label: "YOUTUBE" };
   if (/vimeo\.com/i.test(video.url)) return { cls: "vimeo", label: "VIMEO" };
   if (/\.m3u8(\?|$)/i.test(video.url)) return { cls: "hls", label: "HLS" };
