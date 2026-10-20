@@ -6,7 +6,20 @@ import {
 } from "../../../../lib/core.js";
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = ["mp4", "webm", "mov", "m4v", "mkv", "avi", "m3u8", "ts"];
+const ALLOWED_EXTENSIONS = [
+  "mp4", "webm", "mov", "m4v", "mkv", "avi", "m3u8", "ts",
+  "jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg",
+];
+const IMAGE_MIME = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+};
 
 export async function onRequest(context) {
   if (context.request.method !== "POST") {
@@ -63,6 +76,7 @@ export async function onRequest(context) {
 
   const contentType =
     file.type ||
+    IMAGE_MIME[extension] ||
     (extension === "m3u8"
       ? "application/vnd.apple.mpegurl"
       : extension === "ts"
