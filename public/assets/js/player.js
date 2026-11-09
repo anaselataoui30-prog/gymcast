@@ -1,25 +1,4 @@
-// --- KEEP TV SCREEN AWAKE ---
-let wakeLock = null;
 
-async function requestWakeLock() {
-  try {
-    wakeLock = await navigator.wakeLock.request('screen');
-    console.log('✅ Screen Wake Lock is active. TV will not sleep.');
-  } catch (err) {
-    console.log(`❌ Wake Lock Error: ${err.name}, ${err.message}`);
-  }
-}
-
-// Request the lock when the page loads
-requestWakeLock();
-
-// Re-request the lock if the TV tab loses focus and comes back
-document.addEventListener('visibilitychange', async () => {
-  if (wakeLock !== null && document.visibilityState === 'visible') {
-    requestWakeLock();
-  }
-});
-// ----------------------------
 /* ============================================================
    GYMCAST TV PLAYER — organized build
    ------------------------------------------------------------
@@ -466,10 +445,23 @@ function playCurrent() {
     return;
   }
 
-  el.player.innerHTML = '<video id="html-vid" autoplay playsinline preload="none"></video>';
+  el.player.innerHTML = '<video id="html-vid" autoplay playsinline preload="metadata"></video>';
   const v = document.getElementById("html-vid");
   S.htmlVid = v;
   v.src = video.url;
+
+  // --- 35-SECOND STALL TIMER ---
+  let stallTimer;
+  v.addEventListener("waiting", () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+          console.log("⚠️ Video stalled for 35s. Auto-reloading...");
+          window.location.reload();
+      }, 35000); 
+  });
+  v.addEventListener("playing", () => clearTimeout(stallTimer));
+  v.addEventListener("canplay", () => clearTimeout(stallTimer));
+  // -----------------------------
   v.volume = S.vol / 100;
   v.playbackRate = 1;
   v.addEventListener("ended", playNext);
@@ -791,27 +783,5 @@ loadSentinel();
 ensureAwake();
 })();
 
-// --- AUTO-RECOVER ON STALL ---
-let stallTimer;
 
-function startStallTimer() {
-    clearTimeout(stallTimer);
-    // If the video is stalled for more than 8 seconds, refresh the page
-    stallTimer = setTimeout(() => {
-        console.log("⚠️ Video stalled for too long. Auto-reloading...");
-        window.location.reload();
-    }, 35000);
-}
 
-function cancelStallTimer() {
-    clearTimeout(stallTimer);
-}
-
-// Attach this to your video element (replace 'videoElement' with whatever your video tag ID is)
-const video = document.getElementById('videoElement'); // or querySelector('video')
-
-if (video) {
-    video.addEventListener('waiting', startStallTimer); // When it buffers
-    video.addEventListener('playing', cancelStallTimer); // When it recovers
-    video.addEventListener('error', startStallTimer); // When it fails
-}
