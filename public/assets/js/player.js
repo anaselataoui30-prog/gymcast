@@ -800,7 +800,7 @@ function startStallTimer() {
     stallTimer = setTimeout(() => {
         console.log("⚠️ Video stalled for too long. Auto-reloading...");
         window.location.reload();
-    }, 8000);
+    }, 35000);
 }
 
 function cancelStallTimer() {
