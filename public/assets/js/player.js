@@ -1,3 +1,25 @@
+// --- KEEP TV SCREEN AWAKE ---
+let wakeLock = null;
+
+async function requestWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    console.log('✅ Screen Wake Lock is active. TV will not sleep.');
+  } catch (err) {
+    console.log(`❌ Wake Lock Error: ${err.name}, ${err.message}`);
+  }
+}
+
+// Request the lock when the page loads
+requestWakeLock();
+
+// Re-request the lock if the TV tab loses focus and comes back
+document.addEventListener('visibilitychange', async () => {
+  if (wakeLock !== null && document.visibilityState === 'visible') {
+    requestWakeLock();
+  }
+});
+// ----------------------------
 /* ============================================================
    GYMCAST TV PLAYER — organized build
    ------------------------------------------------------------
