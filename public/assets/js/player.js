@@ -790,3 +790,28 @@ setInterval(() => { if (document.visibilityState === "visible") ensureAwake(); }
 loadSentinel();
 ensureAwake();
 })();
+
+// --- AUTO-RECOVER ON STALL ---
+let stallTimer;
+
+function startStallTimer() {
+    clearTimeout(stallTimer);
+    // If the video is stalled for more than 8 seconds, refresh the page
+    stallTimer = setTimeout(() => {
+        console.log("⚠️ Video stalled for too long. Auto-reloading...");
+        window.location.reload();
+    }, 8000);
+}
+
+function cancelStallTimer() {
+    clearTimeout(stallTimer);
+}
+
+// Attach this to your video element (replace 'videoElement' with whatever your video tag ID is)
+const video = document.getElementById('videoElement'); // or querySelector('video')
+
+if (video) {
+    video.addEventListener('waiting', startStallTimer); // When it buffers
+    video.addEventListener('playing', cancelStallTimer); // When it recovers
+    video.addEventListener('error', startStallTimer); // When it fails
+}
