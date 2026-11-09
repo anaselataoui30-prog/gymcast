@@ -466,7 +466,7 @@ function playCurrent() {
     return;
   }
 
-  el.player.innerHTML = '<video id="html-vid" autoplay playsinline></video>';
+  el.player.innerHTML = '<video id="html-vid" autoplay playsinline preload="none"></video>';
   const v = document.getElementById("html-vid");
   S.htmlVid = v;
   v.src = video.url;
