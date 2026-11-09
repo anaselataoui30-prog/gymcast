@@ -1,38 +1,36 @@
-
 /* ============================================================
-   GYMCAST TV PLAYER — organized build
-   ------------------------------------------------------------
-   1. DOM & constants
-   2. App state
-   3. Small utils
-   4. Network banner UI (down / buffering / recovered)
-   5. Wall-clock schedule (multi-screen sync, glide + snaps)
-   6. Playback engine (MP4 + YouTube)
-   7. Server polling (playlist, pause, restart, reset, clock)
-   8. Activation (first-time code entry)
-   9. Boot
+   GYMCAST TV PLAYER — 24/7 hardened build
+   Fixes applied: C1–C5, H1–H5, plus targeted medium items.
    ============================================================ */
 (() => {
 "use strict";
 
-/* ---------- 1. DOM & constants ---------- */
+/* ---------- 1. GLOBAL ERROR HANDLING ---------- */
+window.addEventListener('unhandledrejection', e => {
+  console.error('Unhandled rejection:', e.reason);
+});
+window.addEventListener('error', e => {
+  console.error('Global error:', e.error);
+});
+
+/* ---------- 2. DOM & constants ---------- */
 const LS_CODE = "gymcast_tv_code";
 const LS_TOK  = "gymcast_tok";
 const LS_RST  = "gymcast_rst";
 const LS_DUR  = "gc_dur_";
 
 const POLL_MIN = 60, POLL_MAX = 600, POLL_DEFAULT = 600;
-const PROBE_INTERVAL = 60000;        // health probes while offline
-const RETRY_INTERVAL = 10000;        // media retry while offline
-const ALIGN_INTERVAL = 5000;         // sync check cadence
-const BUFFER_BANNER_DELAY = 2500;    // stall must last this long to show banner
+const PROBE_INTERVAL = 60000;
+const RETRY_INTERVAL = 10000;
+const ALIGN_INTERVAL = 5000;
+const BUFFER_BANNER_DELAY = 2500;
 const CATCHUP_MAX = 1.5, SLOWDOWN_MIN = 0.9;
-const SYNC_DEADZONE = 0.3;           // s: inside this = perfectly in sync
-const BOUNDARY_SNAP = 2;             // s: lag that snaps at video boundary
-const MIDFIX_DRIFT = 10;             // s: lag that allows one mid-video snap
-const MIDFIX_BUFFER = 6;             // s: buffer required to allow mid snap
-const CATCHUP_BUFFER = 4;            // s: buffer required to speed-glide
-const CLOCK_TRUST = 10000;           // ms: ignore server clock correction below this
+const SYNC_DEADZONE = 0.3;
+const BOUNDARY_SNAP = 2;
+const MIDFIX_DRIFT = 10;
+const MIDFIX_BUFFER = 6;
+const CATCHUP_BUFFER = 4;
+const CLOCK_TRUST = 10000;
 
 const el = {
   activation: document.getElementById("activation"),
@@ -46,7 +44,7 @@ const el = {
   connect: document.getElementById("connectBtn"),
 };
 
-/* ---------- 2. App state ---------- */
+/* ---------- 3. App state ---------- */
 const S = {
   code: null,
   playlist: [],
@@ -71,12 +69,22 @@ const S = {
   retryTimer: null,
   downClock: null, downSince: 0,
   bufferTimer: null,
+  stallTimer: null,
+  imageTimer: null,
+  imageEndsAt: 0,
+  transitionTimer: null,
+  transitioning: false,
+  standbyShowing: false,
 };
 
-/* ---------- 3. Small utils ---------- */
+let ytFailCount = 0;
+let playlistVersion = 0;
+let lastAnimLoad = 0;
+
+/* ---------- 4. Small utils ---------- */
 const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
 const isImageUrl = (u) => /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(u);
-const IMAGE_DURATION = 15;  // seconds to show each image
+const IMAGE_DURATION = 15;
 const now = () => Date.now();
 const correctedNow = () => now() + S.serverOffset;
 const fmtDur = (ms) => {
@@ -100,7 +108,7 @@ function schedulePoll(delay) {
   S.pollTimer = setTimeout(() => { if (S.pollFn) S.pollFn(); }, delay);
 }
 
-/* ---------- 4. Network banner UI ---------- */
+/* ---------- 5. Network banner UI ---------- */
 function showNet(mode, title, sub) {
   el.net.classList.remove("down", "slow", "ok");
   el.net.classList.add(mode);
@@ -110,9 +118,6 @@ function showNet(mode, title, sub) {
 }
 function hideNet() { el.net.style.display = "none"; }
 
-/* Branded waiting screens — YOUR animation files, cached while online so they
-   appear instantly even with ZERO network (injected from memory, no download).
-   Built-in fallback only if the cache is somehow empty. */
 const ANIM_URLS   = { slow: "/assets/anim/slow.html", offline: "/assets/anim/offline.html" };
 const ANIM_TEXTS  = { slow: "CONNEXION AU SYSTÈME...", offline: "PAS DE CONNEXION" };
 const ANIM_COLORS = { slow: "#ffb02e", offline: "#ff4d3d" };
@@ -149,9 +154,9 @@ maStyle.textContent =
   ".ma-sub{font-family:monospace;font-size:12px;letter-spacing:2px;color:#8791a5;}";
 document.head.appendChild(maStyle);
 
-/* Download your two files while the network is healthy; keep them in memory +
-   localStorage so they can be shown instantly even with the wifi dead. */
 function loadAnimCache() {
+  if (now() - lastAnimLoad < 60000) return;
+  lastAnimLoad = now();
   Object.keys(ANIM_URLS).forEach((kind) => {
     fetch(ANIM_URLS[kind], { cache: "no-store" })
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status))))
@@ -175,7 +180,7 @@ function showAnim(kind) {
   if (html) {
     maFb.style.display = "none";
     netAnimFrame.style.display = "block";
-    netAnimFrame.srcdoc = html;          // YOUR file, injected from memory — no network needed
+    netAnimFrame.srcdoc = html;
   } else {
     netAnimFrame.style.display = "none";
     netAnimFrame.removeAttribute("srcdoc");
@@ -204,6 +209,8 @@ function setNetDown(on, reason) {
   clearTimeout(S.retryTimer); S.retryTimer = null;
 
   if (on) {
+    // FIX H2: kill stall reload timer while offline
+    clearTimeout(S.stallTimer); S.stallTimer = null;
     clearTimeout(S.bufferTimer); S.buffering = false;
     S.downSince = now();
     showNet("down", reason || "📡 NO INTERNET — GYMCAST AUTO-RETRY", "the system is fine · waiting for network · 00:00");
@@ -211,16 +218,17 @@ function setNetDown(on, reason) {
     S.downClock = setInterval(() => {
       if (S.netDown) el.netSub.textContent = "the system is fine · waiting for network · " + fmtDur(now() - S.downSince);
     }, 1000);
-  if (!S.probeTimer) S.probeTimer = setInterval(() => { if (S.netDown) probe(); }, PROBE_INTERVAL);
+    if (!S.probeTimer) S.probeTimer = setInterval(() => { if (S.netDown) probe(); }, PROBE_INTERVAL);
     updateAnim();
   } else {
     clearInterval(S.downClock); S.downClock = null;
     if (S.probeTimer) { clearInterval(S.probeTimer); S.probeTimer = null; }
     showNet("ok", "✔ BACK ONLINE — RESUMING", "");
     setTimeout(() => { if (!S.netDown && !S.buffering) hideNet(); }, 3000);
-    if (!S.paused && mediaIsDead()) playCurrent();
+    // FIX: do not collide with in-flight transitions
+    if (!S.paused && !S.transitioning && mediaIsDead()) playCurrent();
     updateAnim();
-    loadAnimCache();   // refresh your waiting-screen files while we're online again
+    loadAnimCache();
   }
 }
 
@@ -237,7 +245,7 @@ function setBuffering(on) {
   } else {
     clearTimeout(S.bufferTimer);
     if (!S.buffering) return;
-    S.buffering = false;    // ✅ FIXED
+    S.buffering = false;
     if (!S.netDown) hideNet();
     updateAnim();
   }
@@ -249,14 +257,17 @@ async function probe() {
   try {
     const res = await fetch("/api/health?r=" + now(), { cache: "no-store" });
     if (res.ok) { setNetDown(false); schedulePoll(1500); }
-  } catch (e) {}
-  S.probing = false;
+  } catch (e) {
+  } finally {
+    S.probing = false;
+  }
 }
 
 function scheduleRetry() {
   if (S.retryTimer || !S.netDown) return;
   S.retryTimer = setTimeout(() => {
     S.retryTimer = null;
+    clearTimeout(S.stallTimer); S.stallTimer = null;
     if (S.netDown && !S.paused) playCurrent();
   }, RETRY_INTERVAL);
 }
@@ -264,14 +275,19 @@ function scheduleRetry() {
 window.addEventListener("offline", () => setNetDown(true, "📡 NO INTERNET — GYMCAST AUTO-RETRY"));
 window.addEventListener("online", () => setTimeout(probe, 2000));
 
-/* ---------- 5. Wall-clock schedule (sync) ---------- */
+/* ---------- 6. Wall-clock schedule (sync) ---------- */
 function probeDuration(url) {
   return new Promise((resolve) => {
     const v = document.createElement("video");
     v.preload = "metadata";
     v.muted = true;
     const to = setTimeout(() => { cleanup(); resolve(0); }, 8000);
-    function cleanup() { clearTimeout(to); v.removeAttribute("src"); try { v.load(); } catch (e) {} }
+    function cleanup() {
+      clearTimeout(to);
+      try { v.removeAttribute("src"); v.load(); } catch (e) {}
+      v.onloadedmetadata = null;
+      v.onerror = null;
+    }
     v.onloadedmetadata = () => { const d = v.duration; cleanup(); resolve(d); };
     v.onerror = () => { cleanup(); resolve(0); };
     v.src = url;
@@ -281,7 +297,7 @@ function probeDuration(url) {
 async function loadDurations(list) {
   const out = {};
   for (const v of list) {
-    if (isYTUrl(v.url)) return null;                      // sync = pure MP4 playlists only
+    if (isYTUrl(v.url)) return null;
     let cached = null;
     try { cached = JSON.parse(localStorage.getItem(LS_DUR + v.id) || "null"); } catch (e) {}
     if (cached && cached.u === v.url && cached.d > 0) { out[v.id] = cached.d; continue; }
@@ -293,49 +309,45 @@ async function loadDurations(list) {
   return out;
 }
 
-async function setupSync(list) {
-  S.syncOn = false; S.totalDur = 0; S.segStart = [];
-  if (!list.length) return;
+/* FIX C4: pure computation — caller decides when to mutate S */
+async function computeSync(list) {
+  if (!list.length) return null;
   const durs = await loadDurations(list);
-  if (!durs) return;
+  if (!durs) return null;
   let acc = 0;
-  for (const v of list) { S.segStart.push(acc); acc += durs[v.id]; }
-  if (!(acc > 1)) return;
-  S.totalDur = acc;
-  S.syncOn = true;
+  const segStart = [];
+  for (const v of list) { segStart.push(acc); acc += durs[v.id]; }
+  if (!(acc > 1)) return null;
+  return { segStart: segStart, totalDur: acc };
 }
 
 function targetAt(ms) {
   const pos = ((ms / 1000) % S.totalDur + S.totalDur) % S.totalDur;
   let idx = 0;
   for (let i = 0; i < S.segStart.length; i++) if (pos >= S.segStart[i]) idx = i;
-  return { idx, off: pos - S.segStart[idx] };
+  return { idx: idx, off: pos - S.segStart[idx] };
 }
 
-// Glide with speed when safe; snap only when clearly lagging.
 function align() {
+  if (S.transitioning) return;
   if (!S.syncOn || S.paused || S.netDown || !S.htmlVid || !S.playlist.length) return;
   if (S.buffering || S.htmlVid.readyState < 2 || S.htmlVid.seeking) return;
   try {
     const t = targetAt(correctedNow());
-
-    if (t.idx !== S.index) {                              // wrong video (join/recovery)
+    if (t.idx !== S.index) {
       S.index = t.idx;
       S.pendingSeek = t.off >= 1 ? t.off : null;
       S.midFixUsed = false;
       playCurrent();
       return;
     }
-
-    const drift = t.off - S.htmlVid.currentTime;          // >0 = behind schedule
-
+    const drift = t.off - S.htmlVid.currentTime;
     if (!S.midFixUsed && Math.abs(drift) > MIDFIX_DRIFT && bufferAhead() > MIDFIX_BUFFER) {
-      S.midFixUsed = true;                                // one emergency snap per video
+      S.midFixUsed = true;
       S.htmlVid.currentTime = Math.max(0, t.off);
       S.htmlVid.playbackRate = 1;
       return;
     }
-
     let rate = 1;
     if (drift > SYNC_DEADZONE) {
       if (bufferAhead() > CATCHUP_BUFFER) rate = Math.min(CATCHUP_MAX, 1 + drift * 0.15);
@@ -345,19 +357,18 @@ function align() {
     if (Math.abs(S.htmlVid.playbackRate - rate) > 0.01) S.htmlVid.playbackRate = rate;
   } catch (e) {}
 }
-setInterval(align, ALIGN_INTERVAL);
+const alignInterval = setInterval(align, ALIGN_INTERVAL);
 
-/* ---------- 6. Playback engine ---------- */
+/* ---------- 7. Playback engine ---------- */
 function unlockAudio() {
   if (S.audioUnlocked) return;
   S.audioUnlocked = true;
-  if (S.htmlVid) { S.htmlVid.muted = false; S.htmlVid.volume = S.vol / 100; }
-  if (S.ytPlayer && S.ytPlayer.unMute) { S.ytPlayer.unMute(); S.ytPlayer.setVolume(S.vol); }
+  if (S.htmlVid) { try { S.htmlVid.muted = false; S.htmlVid.volume = S.vol / 100; } catch (e) {} }
+  if (S.ytPlayer && S.ytPlayer.unMute) {
+    try { S.ytPlayer.unMute(); S.ytPlayer.setVolume(S.vol); } catch (e) {}
+  }
 }
 
-/* Fullscreen: browsers require a user gesture. Try at boot (works on permissive
-   TV browsers); if blocked, trigger on the FIRST tap/click/key anywhere. Once
-   fullscreen, keep re-entering on interactions in case something exits it. */
 let fsLocked = false;
 function goFullscreen() {
   if (fsLocked) return;
@@ -375,21 +386,17 @@ document.addEventListener("fullscreenchange", () => {
   fsLocked = Boolean(document.fullscreenElement);
   if (fsLocked) hideFsHint();
 });
-/* Gesture-path guard: on laptops/DevTools, Chrome often reports "no active
-   gesture" for clicks that don't really count for fullscreen — skipping the
-   call there stops the wall of red "needs a user gesture" logs. The BOOT call
-   (goFullscreen at load / in startPolling) is left untouched, so permissive TV
-   browsers still go fullscreen with zero taps, exactly as you required. Browsers
-   without navigator.userActivation (most TVs/phones) fall straight through and
-   behave exactly as before. */
-function goFullscreenOnGesture() {
+
+/* FIX H1: unlock audio on any gesture */
+function onAnyGesture() {
+  unlockAudio();
   if (fsLocked) return;
   if (navigator.userActivation && !navigator.userActivation.isActive) return;
   goFullscreen();
 }
-document.body.addEventListener("pointerdown", goFullscreenOnGesture);
-document.body.addEventListener("keydown", goFullscreenOnGesture);
-document.body.addEventListener("click", goFullscreenOnGesture);
+document.body.addEventListener("pointerdown", onAnyGesture);
+document.body.addEventListener("keydown", onAnyGesture);
+document.body.addEventListener("click", onAnyGesture);
 
 function getYTId(url) {
   try {
@@ -400,76 +407,160 @@ function getYTId(url) {
   } catch (e) { return ""; }
 }
 
+/* ---------- Playback teardown & transition guards ---------- */
+function endTransition() {
+  S.transitioning = false;
+  clearTimeout(S.transitionTimer);
+  S.transitionTimer = null;
+}
+
+function destroyPlayers() {
+  clearTimeout(S.stallTimer); S.stallTimer = null;
+  clearTimeout(S.imageTimer); S.imageTimer = null;
+  clearTimeout(S.bufferTimer); S.bufferTimer = null;
+
+  if (S.ytPlayer) {
+    try { S.ytPlayer.destroy(); } catch (e) {}
+    S.ytPlayer = null;
+  }
+  if (S.htmlVid) {
+    const v = S.htmlVid;
+    v.removeEventListener("ended", onVidEnded);
+    v.removeEventListener("error", onVidError);
+    v.removeEventListener("waiting", onVidWaiting);
+    v.removeEventListener("playing", onVidPlaying);
+    v.removeEventListener("canplay", onVidCanPlay);
+    v.removeEventListener("stalled", onVidStalled);
+    try { v.pause(); } catch (e) {}
+    try { v.removeAttribute("src"); v.load(); } catch (e) {}
+    S.htmlVid = null;
+  }
+}
+
+/* ---------- Named handlers ---------- */
+const onVidEnded = () => playNext();
+const onVidError = () => onMediaError();
+const onVidWaiting = () => {
+  setBuffering(true);
+  if (S.netDown) return;                 // FIX H2: no reload while offline
+  clearTimeout(S.stallTimer);
+  S.stallTimer = setTimeout(() => {
+    console.log("⚠️ Video stalled for 35s. Auto-reloading...");
+    window.location.reload();
+  }, 35000);
+};
+const onVidPlaying = () => { setBuffering(false); clearTimeout(S.stallTimer); S.stallTimer = null; endTransition(); };
+const onVidCanPlay = () => { setBuffering(false); clearTimeout(S.stallTimer); S.stallTimer = null; if (S.netDown) probe(); };
+const onVidStalled = () => setBuffering(true);
+
+function armImageTimer(video, remainingMs) {
+  clearTimeout(S.imageTimer);
+  const delay = remainingMs != null ? Math.max(500, remainingMs) : IMAGE_DURATION * 1000;
+  S.imageEndsAt = now() + delay;
+  S.imageTimer = setTimeout(() => {
+    if (!S.paused && S.playlist.length && S.index >= 0 && S.index < S.playlist.length &&
+        S.playlist[S.index] && S.playlist[S.index].url === video.url) {
+      playNext();
+    }
+  }, delay);
+}
+
+/* ---------- playCurrent ---------- */
 function playCurrent() {
-  if (!S.playlist.length) { showStandby(); return; }
+  if (!S.playlist.length) { showStandby(); endTransition(); return; }
 
-  el.player.style.display = "block";
   const video = S.playlist[S.index];
+  if (!video) { showStandby(); endTransition(); return; }
 
-  if (S.ytPlayer) { try { S.ytPlayer.destroy(); } catch (e) {} S.ytPlayer = null; }
-  if (S.htmlVid) { S.htmlVid.removeEventListener("ended", playNext); S.htmlVid.removeEventListener("error", onMediaError); S.htmlVid = null; }
+  S.standbyShowing = false;
+  destroyPlayers();
+  el.player.style.display = "block";
 
   if (isImageUrl(video.url)) {
-    // IMAGE DISPLAY: show fullscreen for IMAGE_DURATION seconds, then advance
-    el.player.innerHTML = `<img id="html-img" src="${video.url}" style="width:100%;height:100%;object-fit:contain;background:#000;" alt="">`;
+    el.player.innerHTML = '<img id="html-img" src="' + video.url + '" style="width:100%;height:100%;object-fit:contain;background:#000;" alt="">';
     const img = document.getElementById("html-img");
-    img.onerror = () => { console.error("Image load failed:", video.url); playNext(); };
-    if (S.paused) return;  // respect pause state
-    setTimeout(() => {
-      if (!S.paused && S.playlist.length && S.index === S.playlist.findIndex(v => v.url === video.url)) {
-        playNext();
-      }
-    }, IMAGE_DURATION * 1000);
+    img.onerror = () => { console.error("Image load failed:", video.url); setTimeout(playNext, 100); };
+    if (S.paused) { endTransition(); return; }
+    armImageTimer(video);
+    endTransition();
     return;
   }
 
   if (isYTUrl(video.url)) {
+    // FIX C1: recursion-safe with retry budget
+    if (typeof YT === 'undefined' || !YT.Player) {
+      ytFailCount++;
+      if (ytFailCount > Math.max(2, S.playlist.length)) {
+        ytFailCount = 0;
+        console.error("YouTube API unavailable — standby");
+        showStandby();
+        endTransition();
+        return;
+      }
+      console.warn("YouTube API not ready, retry " + ytFailCount);
+      endTransition();
+      setTimeout(() => { if (!S.paused) playNext(); }, 1000);
+      return;
+    }
+    ytFailCount = 0;
+    const ytId = getYTId(video.url);
+    if (!ytId) {
+      console.error("Invalid YT URL:", video.url);
+      endTransition();
+      setTimeout(() => { if (!S.paused) playNext(); }, 500);
+      return;
+    }
     el.player.innerHTML = '<div id="yt-player-container" style="width:100%;height:100%;"></div>';
-    S.ytPlayer = new YT.Player("yt-player-container", {
-      videoId: getYTId(video.url),
-      playerVars: { autoplay: 1, mute: 0, loop: 0, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
-      events: {
-        onReady: (e) => {
-          e.target.playVideo();
-          e.target.unMute();
-          e.target.setVolume(S.vol);
-          if (S.paused) e.target.pauseVideo();
+    try {
+      S.ytPlayer = new YT.Player("yt-player-container", {
+        videoId: ytId,
+        playerVars: { autoplay: 1, mute: 0, loop: 0, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
+        events: {
+          onReady: (e) => {
+            try {
+              if (S.paused) { e.target.pauseVideo(); }
+              else { e.target.playVideo(); e.target.unMute(); e.target.setVolume(S.vol); }
+            } catch (err) {}
+          },
+          onStateChange: (e) => {
+            if (e.data === YT.PlayerState.PLAYING) {
+              endTransition();
+              if (S.netDown) probe();
+            } else if (e.data === YT.PlayerState.ENDED) {
+              playNext();
+            }
+          },
+          onError: () => {
+            S.ytPlayer = null;
+            endTransition();
+            if (S.netDown) scheduleRetry();
+            else setTimeout(() => { if (!S.paused) playNext(); }, 500);
+          },
         },
-        onStateChange: (e) => {
-          if (e.data === YT.PlayerState.ENDED) playNext();
-          else if (e.data === YT.PlayerState.PLAYING && S.netDown) probe();
-        },
-        onError: () => { if (S.netDown) scheduleRetry(); else playNext(); },
-      },
-    });
+      });
+    } catch (e) {
+      console.error("YT Error", e);
+      S.ytPlayer = null;
+      endTransition();
+      setTimeout(() => { if (!S.paused) playNext(); }, 1000);
+    }
     return;
   }
 
+  /* HTML <video> */
   el.player.innerHTML = '<video id="html-vid" autoplay playsinline preload="metadata"></video>';
   const v = document.getElementById("html-vid");
   S.htmlVid = v;
-  v.src = video.url;
-
-  // --- 35-SECOND STALL TIMER ---
-  let stallTimer;
-  v.addEventListener("waiting", () => {
-      clearTimeout(stallTimer);
-      stallTimer = setTimeout(() => {
-          console.log("⚠️ Video stalled for 35s. Auto-reloading...");
-          window.location.reload();
-      }, 35000); 
-  });
-  v.addEventListener("playing", () => clearTimeout(stallTimer));
-  v.addEventListener("canplay", () => clearTimeout(stallTimer));
-  // -----------------------------
   v.volume = S.vol / 100;
   v.playbackRate = 1;
-  v.addEventListener("ended", playNext);
-  v.addEventListener("error", onMediaError);
-  v.addEventListener("waiting", () => setBuffering(true));
-  v.addEventListener("stalled", () => setBuffering(true));
-  v.addEventListener("playing", () => setBuffering(false));
-  v.addEventListener("canplay", () => { setBuffering(false); if (S.netDown) probe(); });
+  v.src = video.url;
+
+  v.addEventListener("ended", onVidEnded);
+  v.addEventListener("error", onVidError);
+  v.addEventListener("waiting", onVidWaiting);
+  v.addEventListener("stalled", onVidStalled);
+  v.addEventListener("playing", onVidPlaying);
+  v.addEventListener("canplay", onVidCanPlay);
 
   if (S.pendingSeek != null) {
     const ps = S.pendingSeek; S.pendingSeek = null;
@@ -477,21 +568,34 @@ function playCurrent() {
   }
 
   if (S.paused) {
-    v.pause();
-  } else {
-    const p = v.play();
-    if (p !== undefined) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+    try { v.pause(); } catch (e) {}
+    endTransition();
+    return;
   }
+
+  const p = v.play();
+  if (p !== undefined) p.catch(() => { try { v.muted = true; v.play().catch(() => {}); } catch (e) {} });
+  endTransition();
 }
 
 function onMediaError() {
-  if (S.netDown) scheduleRetry();   // offline: retry same video, never skip
-  else playNext();                  // online: broken file → skip it
+  if (S.netDown) scheduleRetry();
+  else playNext();
 }
 
 function playNext() {
+  // FIX C2: guards BEFORE setting transitioning
+  if (S.transitioning) return;
   if (!S.playlist.length || S.paused) return;
   if (S.netDown) { scheduleRetry(); return; }
+
+  S.transitioning = true;
+  clearTimeout(S.transitionTimer);
+  S.transitionTimer = setTimeout(() => { S.transitioning = false; S.transitionTimer = null; }, 10000);
+
+  clearTimeout(S.stallTimer); S.stallTimer = null;
+  clearTimeout(S.imageTimer); S.imageTimer = null;
+  clearTimeout(S.bufferTimer); S.bufferTimer = null;
 
   let next = (S.index + 1) % S.playlist.length;
   S.pendingSeek = null;
@@ -500,7 +604,7 @@ function playNext() {
     try {
       const t = targetAt(correctedNow());
       if (t.idx !== next && t.idx !== S.index) { next = t.idx; S.pendingSeek = t.off >= 1 ? t.off : null; }
-      else if (t.idx === next && t.off > BOUNDARY_SNAP) { S.pendingSeek = t.off; }  // lagging screen snaps at boundary
+      else if (t.idx === next && t.off > BOUNDARY_SNAP) { S.pendingSeek = t.off; }
     } catch (e) {}
   }
 
@@ -510,6 +614,9 @@ function playNext() {
 }
 
 function showStandby() {
+  if (S.standbyShowing && !S.htmlVid && !S.ytPlayer) return;
+  destroyPlayers();
+  S.standbyShowing = true;
   el.player.style.display = "flex";
   el.player.innerHTML = '<div id="standby-text">M-FITNESS ✓</div>';
   el.pausedBadge.style.display = "none";
@@ -518,30 +625,48 @@ function showStandby() {
 function applyPause(p) {
   if (p === S.paused) return;
   S.paused = p;
+
   if (p) {
-    if (S.htmlVid) { S.htmlVid.pause(); S.htmlVid.playbackRate = 1; }
-    if (S.ytPlayer && S.ytPlayer.pauseVideo) S.ytPlayer.pauseVideo();
+    endTransition();
+    clearTimeout(S.stallTimer); S.stallTimer = null;
+    clearTimeout(S.imageTimer); S.imageTimer = null;      // imageEndsAt survives
+    clearTimeout(S.bufferTimer); S.bufferTimer = null;
+    if (S.htmlVid) { try { S.htmlVid.pause(); S.htmlVid.playbackRate = 1; } catch (e) {} }
+    if (S.ytPlayer && S.ytPlayer.pauseVideo) { try { S.ytPlayer.pauseVideo(); } catch (e) {} }
     el.pausedBadge.style.display = "block";
   } else {
     el.pausedBadge.style.display = "none";
-    if (S.htmlVid) { S.htmlVid.playbackRate = 1; S.htmlVid.play().catch(() => {}); }
-    if (S.ytPlayer && S.ytPlayer.playVideo) S.ytPlayer.playVideo();
+    if (S.htmlVid) { S.htmlVid.playbackRate = 1; const pr = S.htmlVid.play(); if (pr && pr.catch) pr.catch(() => {}); }
+    if (S.ytPlayer && S.ytPlayer.playVideo) { try { S.ytPlayer.playVideo(); } catch (e) {} }
+    // FIX C3: re-arm image timer if we're paused on an image
+    if (!S.htmlVid && !S.ytPlayer && S.playlist.length) {
+      const cur = S.playlist[S.index];
+      if (cur && isImageUrl(cur.url)) {
+        const remaining = S.imageEndsAt > 0 ? S.imageEndsAt - now() : undefined;
+        armImageTimer(cur, remaining);
+      } else if (cur) {
+        playCurrent();
+      }
+    }
   }
 }
 
-/* ---------- 7. Server polling ---------- */
+/* ---------- 8. Server polling ---------- */
 async function startPolling(code) {
   S.code = code;
   goFullscreen();
 
   async function poll() {
-    const t0 = (window.performance && performance.now) ? performance.now() : now();
+    const myVersion = ++playlistVersion;
     try {
-      const res = await fetch(`/api/tv/state?code=${code}&hb=1`);
+      const t0 = (window.performance && performance.now) ? performance.now() : now();
+      const res = await fetch("/api/tv/state?code=" + code + "&hb=1");
       const rtt = ((window.performance && performance.now) ? performance.now() : now()) - t0;
 
       if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
       if (!res.ok) throw new Error("HTTP " + res.status);
+
+      if (S.netDown) setNetDown(false);
 
       const dh = res.headers.get("date");
       if (dh) {
@@ -550,13 +675,12 @@ async function startPolling(code) {
           const off = st + Math.min(rtt, 4000) / 2 - now();
           if (S.bestRtt === null || rtt <= S.bestRtt) {
             S.bestRtt = rtt;
-            S.serverOffset = Math.abs(off) > CLOCK_TRUST ? off : 0;   // trust device NTP unless wildly wrong
+            S.serverOffset = Math.abs(off) > CLOCK_TRUST ? off : 0;
           }
         }
       }
 
       const data = await res.json();
-      if (S.netDown) setNetDown(false);
 
       if (data.reloadToken && localStorage.getItem(LS_TOK) !== data.reloadToken) {
         localStorage.setItem(LS_TOK, data.reloadToken);
@@ -578,25 +702,45 @@ async function startPolling(code) {
       const currentIds = S.playlist.map(v => v.id).join(",");
 
       if (incomingIds !== currentIds) {
+        // FIX C4: compute durations BEFORE mutating state
+        const sync = await computeSync(incoming);
+        if (myVersion !== playlistVersion) { schedulePoll(S.idleDelay); return; }
+
         S.playlist = incoming;
-        await setupSync(S.playlist);
-        if (S.syncOn) {
-          const t = targetAt(correctedNow());
-          S.index = t.idx;
-          S.pendingSeek = t.off >= 1 ? t.off : null;
+        if (sync) {
+          S.segStart = sync.segStart;
+          S.totalDur = sync.totalDur;
+          S.syncOn = true;
+          try {
+            const t = targetAt(correctedNow());
+            S.index = t.idx;
+            S.pendingSeek = t.off >= 1 ? t.off : null;
+          } catch (e) {
+            S.index = 0; S.pendingSeek = null;
+          }
         } else {
+          S.segStart = [];
+          S.totalDur = 0;
+          S.syncOn = false;
           S.index = 0;
+          S.pendingSeek = null;
         }
         S.midFixUsed = false;
-        playCurrent();
-      } else if (!S.playlist.length && el.player.style.display !== "flex") {
+        try { playCurrent(); } catch (pcErr) { console.error("playCurrent error:", pcErr); }
+      } else if (!S.playlist.length && !S.standbyShowing) {
         showStandby();
       }
 
-      applyPause(Boolean(data.paused));
+      try { applyPause(Boolean(data.paused)); } catch (apErr) { console.error("applyPause error:", apErr); }
+
     } catch (e) {
       console.error("Poll error", e);
-      setNetDown(true);
+      // FIX H5: only true network/5xx errors flip the offline banner
+      const isNetwork =
+        e instanceof TypeError ||
+        (e && e.name === "NetworkError") ||
+        (e && typeof e.message === "string" && e.message.indexOf("HTTP 5") === 0);
+      if (isNetwork) setNetDown(true);
     }
     schedulePoll(S.idleDelay);
   }
@@ -605,7 +749,7 @@ async function startPolling(code) {
   poll();
 }
 
-/* ---------- 8. Activation ---------- */
+/* ---------- 9. Activation ---------- */
 el.digits.forEach((d, i) => {
   d.addEventListener("input", () => {
     d.value = d.value.replace(/\D/g, "");
@@ -625,7 +769,7 @@ el.connect.addEventListener("click", async () => {
     const res = await fetch("/api/tv/activate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code: code }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Code not found");
@@ -638,49 +782,39 @@ el.connect.addEventListener("click", async () => {
   }
 });
 
-/* ---------- 9. Boot ---------- */
-window.onYouTubeIframeAPIReady = function () {};
+/* ---------- 10. Boot ---------- */
+if (!window.onYouTubeIframeAPIReady) {
+  window.onYouTubeIframeAPIReady = function () {};
+}
 
-// Add fullscreen hint (disappears once fullscreen activates)
 const fsHint = document.createElement("div");
 fsHint.id = "fs-hint";
 fsHint.textContent = "Tap screen for fullscreen";
 fsHint.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:100;background:rgba(0,0,0,0.7);color:#ffb02e;padding:10px 20px;border-radius:8px;font-family:monospace;font-size:14px;pointer-events:none;";
 document.body.appendChild(fsHint);
 
-goFullscreen();   // permissive TV browsers go full immediately; strict ones wait for first tap
+goFullscreen();
 const saved = localStorage.getItem(LS_CODE);
 if (saved) {
   el.activation.style.display = "none";
   startPolling(saved);
 }
 
-// Hide hint after 3 seconds if already fullscreen
 setTimeout(() => { if (document.fullscreenElement) hideFsHint(); }, 3000);
 
-/* ---------- 10. Keep the screen awake — THREE independent layers ----------
-   L1 navigator.wakeLock   (Chrome/Edge/Samsung/Chromium TVs)
-   L2 hidden 1s video FILE (strongest; universal playback; cached offline)
-   L3 hidden canvas video  (no file needed; saves Firefox/Safari/odd engines)
-   Global background layer on <body> — independent of the playback engine, so
-   it covers videos, YouTube links, pictures, standby, the offline/slow
-   animations AND the paused state, and survives every playCurrent() wipe.
-   NOT a gym video: never in library / playlists / admin / fleet check.
-   Every step guarded: missing file or unsupported browser = silent no-op,
-   playback can never regress. */
-
+/* ---------- 11. Keep screen awake ---------- */
 const SENTINEL_URL = "/assets/sys/sentinel.mp4";
 const SENTINEL_CACHE_KEY = "gc_sentinel_b64";
 let sentinelData = "";
 try { sentinelData = localStorage.getItem(SENTINEL_CACHE_KEY) || ""; } catch (e) { sentinelData = ""; }
 
-let wl = null;            // L1 handle
-let sentinelEl = null;    // L2 element
-let sentinelOk = false;   // L2 actually playing?
-let canvasVid = null;     // L3 element
+let wl = null;
+let sentinelEl = null;
+let sentinelOk = false;
+let canvasVid = null;
 let canvasTimer = null, canvasTick = 0;
+let canvasStream = null;
 
-/* ---- L2: the hidden video file (fetched once online, cached forever) ---- */
 function loadSentinel() {
   fetch(SENTINEL_URL)
     .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error("HTTP " + r.status))))
@@ -692,14 +826,18 @@ function loadSentinel() {
       try { localStorage.setItem(SENTINEL_CACHE_KEY, sentinelData); } catch (e) {}
       if (document.visibilityState === "visible") startSentinel();
     })
-    .catch(() => {});   // offline first boot / no file -> L3 still guards
+    .catch(() => {});
 }
+
 function startSentinel() {
-  if (!sentinelData) { startCanvas(); return; }      // no file -> fall through to L3
-  if (sentinelEl) { if (sentinelEl.paused) { const p = sentinelEl.play(); if (p && p.catch) p.catch(() => {}); } return; }
+  if (!sentinelData) { startCanvas(); return; }
+  if (sentinelEl) {
+    if (sentinelEl.paused) { const p = sentinelEl.play(); if (p && p.catch) p.catch(() => {}); }
+    return;
+  }
   try {
     const v = document.createElement("video");
-    v.id = "gc-sentinel";                            // NOT html-vid -> sync/mediaIsDead ignore it
+    v.id = "gc-sentinel";
     v.src = sentinelData;
     v.muted = true; v.defaultMuted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
     v.setAttribute("playsinline", ""); v.setAttribute("muted", ""); v.setAttribute("autoplay", ""); v.setAttribute("loop", "");
@@ -709,12 +847,13 @@ function startSentinel() {
     v.addEventListener("playing", () => { sentinelOk = true; stopCanvas(); });
     v.addEventListener("timeupdate", () => { sentinelOk = true; stopCanvas(); });
     v.onerror = () => { sentinelOk = false; startCanvas(); };
-    document.body.appendChild(v);                    // body, NOT #player -> wipes never kill it
+    document.body.appendChild(v);
     sentinelEl = v;
     const p = v.play(); if (p && p.catch) p.catch(() => {});
-    setTimeout(() => { if (!sentinelOk) startCanvas(); }, 4000);  // file didn't start -> L3
+    setTimeout(() => { if (!sentinelOk) startCanvas(); }, 4000);
   } catch (e) { startCanvas(); }
 }
+
 function stopSentinel() {
   sentinelOk = false;
   if (!sentinelEl) return;
@@ -724,7 +863,6 @@ function stopSentinel() {
   sentinelEl = null;
 }
 
-/* ---- L3: canvas moving-pixel video (zero file, saves Firefox/Safari) ---- */
 function startCanvas() {
   if (canvasVid || sentinelOk) return;
   try {
@@ -732,6 +870,7 @@ function startCanvas() {
     const ctx = c.getContext("2d");
     if (!ctx || typeof c.captureStream !== "function") return;
     const stream = c.captureStream(0);
+    canvasStream = stream;
     const track = stream.getVideoTracks && stream.getVideoTracks()[0];
     const v = document.createElement("video");
     v.muted = true; v.volume = 0; v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
@@ -741,21 +880,29 @@ function startCanvas() {
     const p = v.play(); if (p && p.catch) p.catch(() => {});
     canvasVid = v;
     canvasTimer = setInterval(() => {
-      try { ctx.fillStyle = (canvasTick++ % 2) ? "#000" : "#010101"; ctx.fillRect(0, 0, 16, 16);
-            if (track && track.requestFrame) track.requestFrame(); } catch (e) {}
+      try {
+        ctx.fillStyle = (canvasTick++ % 2) ? "#000" : "#010101";
+        ctx.fillRect(0, 0, 16, 16);
+        if (track && track.requestFrame) track.requestFrame();
+      } catch (e) {}
     }, 2000);
   } catch (e) {}
 }
+
 function stopCanvas() {
-  if (!canvasVid) return;
-  clearInterval(canvasTimer); canvasTimer = null;
-  try { canvasVid.pause(); } catch (e) {}
-  try { canvasVid.removeAttribute("srcObject"); canvasVid.load(); } catch (e) {}
-  try { canvasVid.remove(); } catch (e) {}
-  canvasVid = null;
+  if (canvasStream) {
+    try { canvasStream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); } catch (e) {}
+    canvasStream = null;
+  }
+  if (canvasVid) {
+    clearInterval(canvasTimer); canvasTimer = null;
+    try { canvasVid.pause(); } catch (e) {}
+    try { canvasVid.srcObject = null; canvasVid.load(); } catch (e) {}   // FIX H4
+    try { canvasVid.remove(); } catch (e) {}
+    canvasVid = null;
+  }
 }
 
-/* ---- L1: the real Wake Lock API ---- */
 async function tryWakeLock() {
   if (wl && !wl.released) return;
   if (!("wakeLock" in navigator) || !navigator.wakeLock) return;
@@ -766,22 +913,33 @@ async function tryWakeLock() {
 }
 function releaseWakeLock() { try { if (wl && !wl.released) wl.release(); } catch (e) {} wl = null; }
 
-/* ---- the conductor: hold all available layers while visible ---- */
 function ensureAwake() {
   if (document.visibilityState !== "visible") return;
-  tryWakeLock();                 // L1
-  startSentinel();               // L2 (auto-drops to L3 if no file / fails)
+  tryWakeLock();
+  startSentinel();
 }
 function releaseAwake() { releaseWakeLock(); stopSentinel(); stopCanvas(); }
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") ensureAwake(); else releaseAwake();
 });
-setInterval(() => { if (document.visibilityState === "visible") ensureAwake(); }, 25000);
+const awakeInterval = setInterval(() => { if (document.visibilityState === "visible") ensureAwake(); }, 25000);
 
 loadSentinel();
 ensureAwake();
+
+/* ---------- 12. Defensive cleanup ---------- */
+window.addEventListener("beforeunload", () => {
+  try { clearInterval(alignInterval); } catch (e) {}
+  try { clearInterval(awakeInterval); } catch (e) {}
+  clearTimeout(S.pollTimer);
+  clearTimeout(S.retryTimer);
+  clearTimeout(S.bufferTimer);
+  clearTimeout(S.stallTimer);
+  clearTimeout(S.imageTimer);
+  clearTimeout(S.transitionTimer);
+  clearInterval(S.downClock);
+  clearInterval(S.probeTimer);
+  try { releaseAwake(); } catch (e) {}
+});
 })();
-
-
-
