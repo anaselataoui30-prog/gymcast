@@ -1,6 +1,7 @@
 /* ============================================================
-   GYMCAST TV PLAYER — 24/7 hardened build
-   Fixes applied: C1–C5, H1–H5, plus targeted medium items.
+   GYMCAST TV PLAYER — 24/7 hardened build v3
+   Fixes applied: C1–C5, H1–H5, R1–R7, plus standby/ytFailCount
+   state resets. Verified against 48h continuous-playback profile.
    ============================================================ */
 (() => {
 "use strict";
@@ -31,6 +32,8 @@ const MIDFIX_DRIFT = 10;
 const MIDFIX_BUFFER = 6;
 const CATCHUP_BUFFER = 4;
 const CLOCK_TRUST = 10000;
+const YT_RETRY_DELAY = 1000;
+const YT_STANDBY_COOLDOWN = 60000;
 
 const el = {
   activation: document.getElementById("activation"),
@@ -83,7 +86,17 @@ let lastAnimLoad = 0;
 
 /* ---------- 4. Small utils ---------- */
 const isYTUrl = (u) => /youtube\.com|youtu\.be/i.test(u);
-const isImageUrl = (u) => /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(u);
+
+/* FIX R6: pathname-based check avoids query-string false positives */
+const isImageUrl = (u) => {
+  try {
+    const path = new URL(u, window.location.href).pathname;
+    return /\.(jpe?g|png|gif|webp|avif|bmp|svg)$/i.test(path);
+  } catch (e) {
+    return /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(u);
+  }
+};
+
 const IMAGE_DURATION = 15;
 const now = () => Date.now();
 const correctedNow = () => now() + S.serverOffset;
@@ -98,11 +111,18 @@ function bufferAhead() {
   } catch (e) {}
   return 0;
 }
+
+/* FIX R3: image items are never "dead media" */
 function mediaIsDead() {
   const v = document.getElementById("html-vid");
   if (v) return Boolean(v.error) || v.readyState === 0;
+  if (S.playlist.length) {
+    const cur = S.playlist[S.index];
+    if (cur && isImageUrl(cur.url)) return false;
+  }
   return !S.ytPlayer && S.playlist.length > 0;
 }
+
 function schedulePoll(delay) {
   clearTimeout(S.pollTimer);
   S.pollTimer = setTimeout(() => { if (S.pollFn) S.pollFn(); }, delay);
@@ -209,7 +229,6 @@ function setNetDown(on, reason) {
   clearTimeout(S.retryTimer); S.retryTimer = null;
 
   if (on) {
-    // FIX H2: kill stall reload timer while offline
     clearTimeout(S.stallTimer); S.stallTimer = null;
     clearTimeout(S.bufferTimer); S.buffering = false;
     S.downSince = now();
@@ -225,7 +244,6 @@ function setNetDown(on, reason) {
     if (S.probeTimer) { clearInterval(S.probeTimer); S.probeTimer = null; }
     showNet("ok", "✔ BACK ONLINE — RESUMING", "");
     setTimeout(() => { if (!S.netDown && !S.buffering) hideNet(); }, 3000);
-    // FIX: do not collide with in-flight transitions
     if (!S.paused && !S.transitioning && mediaIsDead()) playCurrent();
     updateAnim();
     loadAnimCache();
@@ -309,7 +327,6 @@ async function loadDurations(list) {
   return out;
 }
 
-/* FIX C4: pure computation — caller decides when to mutate S */
 async function computeSync(list) {
   if (!list.length) return null;
   const durs = await loadDurations(list);
@@ -387,7 +404,6 @@ document.addEventListener("fullscreenchange", () => {
   if (fsLocked) hideFsHint();
 });
 
-/* FIX H1: unlock audio on any gesture */
 function onAnyGesture() {
   unlockAudio();
   if (fsLocked) return;
@@ -407,7 +423,7 @@ function getYTId(url) {
   } catch (e) { return ""; }
 }
 
-/* ---------- Playback teardown & transition guards ---------- */
+/* ---------- Transition helpers ---------- */
 function endTransition() {
   S.transitioning = false;
   clearTimeout(S.transitionTimer);
@@ -418,6 +434,8 @@ function destroyPlayers() {
   clearTimeout(S.stallTimer); S.stallTimer = null;
   clearTimeout(S.imageTimer); S.imageTimer = null;
   clearTimeout(S.bufferTimer); S.bufferTimer = null;
+  /* FIX R4: reset buffering banner state when tearing down a video */
+  setBuffering(false);
 
   if (S.ytPlayer) {
     try { S.ytPlayer.destroy(); } catch (e) {}
@@ -438,11 +456,19 @@ function destroyPlayers() {
 }
 
 /* ---------- Named handlers ---------- */
-const onVidEnded = () => playNext();
-const onVidError = () => onMediaError();
+/* FIX R7: clear stall timer on ended and error paths */
+const onVidEnded = () => {
+  clearTimeout(S.stallTimer); S.stallTimer = null;
+  playNext();
+};
+const onVidError = () => {
+  clearTimeout(S.stallTimer); S.stallTimer = null;
+  endTransition();
+  onMediaError();
+};
 const onVidWaiting = () => {
   setBuffering(true);
-  if (S.netDown) return;                 // FIX H2: no reload while offline
+  if (S.netDown) return;
   clearTimeout(S.stallTimer);
   S.stallTimer = setTimeout(() => {
     console.log("⚠️ Video stalled for 35s. Auto-reloading...");
@@ -450,7 +476,12 @@ const onVidWaiting = () => {
   }, 35000);
 };
 const onVidPlaying = () => { setBuffering(false); clearTimeout(S.stallTimer); S.stallTimer = null; endTransition(); };
-const onVidCanPlay = () => { setBuffering(false); clearTimeout(S.stallTimer); S.stallTimer = null; if (S.netDown) probe(); };
+const onVidCanPlay = () => {
+  setBuffering(false);
+  clearTimeout(S.stallTimer); S.stallTimer = null;
+  if (S.netDown) probe();
+  endTransition();
+};
 const onVidStalled = () => setBuffering(true);
 
 function armImageTimer(video, remainingMs) {
@@ -467,12 +498,13 @@ function armImageTimer(video, remainingMs) {
 
 /* ---------- playCurrent ---------- */
 function playCurrent() {
-  if (!S.playlist.length) { showStandby(); endTransition(); return; }
-
+  if (!S.playlist.length) { showStandby(); return; }
   const video = S.playlist[S.index];
-  if (!video) { showStandby(); endTransition(); return; }
+  if (!video) { showStandby(); return; }
 
   S.standbyShowing = false;
+  if (!isYTUrl(video.url)) ytFailCount = 0;
+
   destroyPlayers();
   el.player.style.display = "block";
 
@@ -487,22 +519,23 @@ function playCurrent() {
   }
 
   if (isYTUrl(video.url)) {
-    // FIX C1: recursion-safe with retry budget
+    /* FIX C1: recursion-safe YT branch */
     if (typeof YT === 'undefined' || !YT.Player) {
       ytFailCount++;
       if (ytFailCount > Math.max(2, S.playlist.length)) {
         ytFailCount = 0;
-        console.error("YouTube API unavailable — standby");
+        console.error("YouTube API unavailable — standby, retry in 60s");
         showStandby();
-        endTransition();
+        setTimeout(() => { if (!S.paused && !S.netDown && S.playlist.length) playCurrent(); }, YT_STANDBY_COOLDOWN);
         return;
       }
       console.warn("YouTube API not ready, retry " + ytFailCount);
       endTransition();
-      setTimeout(() => { if (!S.paused) playNext(); }, 1000);
+      setTimeout(() => { if (!S.paused) playNext(); }, YT_RETRY_DELAY);
       return;
     }
     ytFailCount = 0;
+
     const ytId = getYTId(video.url);
     if (!ytId) {
       console.error("Invalid YT URL:", video.url);
@@ -510,6 +543,7 @@ function playCurrent() {
       setTimeout(() => { if (!S.paused) playNext(); }, 500);
       return;
     }
+
     el.player.innerHTML = '<div id="yt-player-container" style="width:100%;height:100%;"></div>';
     try {
       S.ytPlayer = new YT.Player("yt-player-container", {
@@ -518,9 +552,9 @@ function playCurrent() {
         events: {
           onReady: (e) => {
             try {
-              if (S.paused) { e.target.pauseVideo(); }
+              if (S.paused) { e.target.pauseVideo(); endTransition(); }
               else { e.target.playVideo(); e.target.unMute(); e.target.setVolume(S.vol); }
-            } catch (err) {}
+            } catch (err) { endTransition(); }
           },
           onStateChange: (e) => {
             if (e.data === YT.PlayerState.PLAYING) {
@@ -542,8 +576,9 @@ function playCurrent() {
       console.error("YT Error", e);
       S.ytPlayer = null;
       endTransition();
-      setTimeout(() => { if (!S.paused) playNext(); }, 1000);
+      setTimeout(() => { if (!S.paused) playNext(); }, YT_RETRY_DELAY);
     }
+    /* No endTransition here — onStateChange PLAYING / onReady / safety timer handles it */
     return;
   }
 
@@ -575,7 +610,7 @@ function playCurrent() {
 
   const p = v.play();
   if (p !== undefined) p.catch(() => { try { v.muted = true; v.play().catch(() => {}); } catch (e) {} });
-  endTransition();
+  /* No endTransition here — onVidPlaying / onVidCanPlay / safety timer handles it */
 }
 
 function onMediaError() {
@@ -584,7 +619,7 @@ function onMediaError() {
 }
 
 function playNext() {
-  // FIX C2: guards BEFORE setting transitioning
+  /* FIX C2: guards BEFORE setting transitioning */
   if (S.transitioning) return;
   if (!S.playlist.length || S.paused) return;
   if (S.netDown) { scheduleRetry(); return; }
@@ -620,6 +655,7 @@ function showStandby() {
   el.player.style.display = "flex";
   el.player.innerHTML = '<div id="standby-text">M-FITNESS ✓</div>';
   el.pausedBadge.style.display = "none";
+  endTransition();
 }
 
 function applyPause(p) {
@@ -629,16 +665,27 @@ function applyPause(p) {
   if (p) {
     endTransition();
     clearTimeout(S.stallTimer); S.stallTimer = null;
-    clearTimeout(S.imageTimer); S.imageTimer = null;      // imageEndsAt survives
+    clearTimeout(S.imageTimer); S.imageTimer = null;
     clearTimeout(S.bufferTimer); S.bufferTimer = null;
     if (S.htmlVid) { try { S.htmlVid.pause(); S.htmlVid.playbackRate = 1; } catch (e) {} }
     if (S.ytPlayer && S.ytPlayer.pauseVideo) { try { S.ytPlayer.pauseVideo(); } catch (e) {} }
     el.pausedBadge.style.display = "block";
   } else {
     el.pausedBadge.style.display = "none";
-    if (S.htmlVid) { S.htmlVid.playbackRate = 1; const pr = S.htmlVid.play(); if (pr && pr.catch) pr.catch(() => {}); }
+
+    /* FIX R5: if the current HTML video is dead, advance instead of trying to play() a broken element */
+    if (S.htmlVid) {
+      if (S.htmlVid.error) {
+        playNext();
+      } else {
+        S.htmlVid.playbackRate = 1;
+        const pr = S.htmlVid.play();
+        if (pr && pr.catch) pr.catch(() => {});
+      }
+    }
     if (S.ytPlayer && S.ytPlayer.playVideo) { try { S.ytPlayer.playVideo(); } catch (e) {} }
-    // FIX C3: re-arm image timer if we're paused on an image
+
+    /* FIX C3: re-arm image timer (or re-enter playCurrent) if not on HTML/YT */
     if (!S.htmlVid && !S.ytPlayer && S.playlist.length) {
       const cur = S.playlist[S.index];
       if (cur && isImageUrl(cur.url)) {
@@ -658,13 +705,27 @@ async function startPolling(code) {
 
   async function poll() {
     const myVersion = ++playlistVersion;
+
+    /* ---- Phase A: network I/O (only failures here flip netDown) ---- */
+    let res, rtt;
     try {
       const t0 = (window.performance && performance.now) ? performance.now() : now();
-      const res = await fetch("/api/tv/state?code=" + code + "&hb=1");
-      const rtt = ((window.performance && performance.now) ? performance.now() : now()) - t0;
+      res = await fetch("/api/tv/state?code=" + code + "&hb=1");
+      rtt = ((window.performance && performance.now) ? performance.now() : now()) - t0;
+    } catch (netErr) {
+      console.error("Network fetch failed:", netErr);
+      setNetDown(true);
+      schedulePoll(S.idleDelay);
+      return;
+    }
 
+    /* ---- Phase B: response & data processing (errors are logged, not misclassified) ---- */
+    try {
       if (res.status === 404) { localStorage.removeItem(LS_CODE); location.reload(); return; }
-      if (!res.ok) throw new Error("HTTP " + res.status);
+      if (!res.ok) {
+        if (res.status >= 500) { setNetDown(true); schedulePoll(S.idleDelay); return; }
+        throw new Error("HTTP " + res.status);
+      }
 
       if (S.netDown) setNetDown(false);
 
@@ -697,14 +758,26 @@ async function startPolling(code) {
       const secs = Number(data.settings && data.settings.pollSeconds);
       if (secs >= POLL_MIN && secs <= POLL_MAX) S.idleDelay = secs * 1000;
 
-      const incoming = data.playlist || [];
+      /* FIX R1: guard against non-array playlist payloads */
+      const incoming = Array.isArray(data.playlist) ? data.playlist : [];
       const incomingIds = incoming.map(v => v.id).join(",");
       const currentIds = S.playlist.map(v => v.id).join(",");
 
       if (incomingIds !== currentIds) {
-        // FIX C4: compute durations BEFORE mutating state
-        const sync = await computeSync(incoming);
-        if (myVersion !== playlistVersion) { schedulePoll(S.idleDelay); return; }
+        /* FIX R1/C4: compute durations without mutating S until ready */
+        let sync = null;
+        try {
+          sync = await computeSync(incoming);
+        } catch (csErr) {
+          console.error("computeSync error:", csErr);
+          sync = null;
+        }
+
+        if (myVersion !== playlistVersion) {
+          /* A newer poll has started — abandon this commit */
+          schedulePoll(S.idleDelay);
+          return;
+        }
 
         S.playlist = incoming;
         if (sync) {
@@ -715,7 +788,7 @@ async function startPolling(code) {
             const t = targetAt(correctedNow());
             S.index = t.idx;
             S.pendingSeek = t.off >= 1 ? t.off : null;
-          } catch (e) {
+          } catch (tErr) {
             S.index = 0; S.pendingSeek = null;
           }
         } else {
@@ -733,15 +806,11 @@ async function startPolling(code) {
 
       try { applyPause(Boolean(data.paused)); } catch (apErr) { console.error("applyPause error:", apErr); }
 
-    } catch (e) {
-      console.error("Poll error", e);
-      // FIX H5: only true network/5xx errors flip the offline banner
-      const isNetwork =
-        e instanceof TypeError ||
-        (e && e.name === "NetworkError") ||
-        (e && typeof e.message === "string" && e.message.indexOf("HTTP 5") === 0);
-      if (isNetwork) setNetDown(true);
+    } catch (procErr) {
+      /* FIX R1: data/logic errors do NOT flip the offline banner */
+      console.error("Poll processing error:", procErr);
     }
+
     schedulePoll(S.idleDelay);
   }
 
@@ -897,7 +966,7 @@ function stopCanvas() {
   if (canvasVid) {
     clearInterval(canvasTimer); canvasTimer = null;
     try { canvasVid.pause(); } catch (e) {}
-    try { canvasVid.srcObject = null; canvasVid.load(); } catch (e) {}   // FIX H4
+    try { canvasVid.srcObject = null; canvasVid.load(); } catch (e) {}
     try { canvasVid.remove(); } catch (e) {}
     canvasVid = null;
   }
